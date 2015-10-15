@@ -1,0 +1,631 @@
+#define DISABLE_REACTIVEUI
+
+#if !DISABLE_REACTIVEUI
+using ReactiveUI;
+#endif
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Reactive.Concurrency;
+using System.Reactive.Disposables;
+using System.Reactive.Linq;
+using System.Threading;
+using System.Windows.Threading;
+
+namespace GitHub.Collections
+{
+    public class TrackingCollection<T> : ObservableCollection<T>, IDisposable
+        where T : class, ICopyable<T>
+    {
+        protected enum TheAction
+        {
+            None,
+            Move,
+            Add,
+            Insert
+        }
+
+        CompositeDisposable disposables = new CompositeDisposable();
+        IObservable<T> source;
+        IObservable<T> sourceQueue;
+        Func<T, T, int> comparer;
+        Func<T, int, IList<T>, bool> filter;
+        IScheduler scheduler;
+        int itemCount = 0;
+        ConcurrentQueue<T> queue;
+
+        List<T> original = new List<T>();
+#if DEBUG
+        public IList<T> DebugInternalList => original;
+#endif
+
+        TimeSpan delay;
+        TimeSpan requestedDelay;
+        TimeSpan fuzziness;
+        public TimeSpan ProcessingDelay {
+            get { return requestedDelay; }
+            set
+            {
+                requestedDelay = value;
+                delay = value;
+            }
+        }
+        
+
+        public TrackingCollection()
+        {
+            queue = new ConcurrentQueue<T>();
+            ProcessingDelay = TimeSpan.FromMilliseconds(10);
+            fuzziness = TimeSpan.FromMilliseconds(1);
+        }
+
+        public TrackingCollection(Func<T, T, int> comparer = null, Func<T, int, IList<T>, bool> filter = null, IScheduler scheduler = null)
+            : this()
+        {
+#if DISABLE_REACTIVEUI
+            this.scheduler = GetScheduler(scheduler);
+#else
+            this.scheduler = scheduler ?? RxApp.MainThreadScheduler;
+#endif
+            this.comparer = comparer;
+            this.filter = filter;
+            original = new List<T>();
+        }
+
+        public TrackingCollection(IObservable<T> source,
+            Func<T, T, int> comparer = null,
+            Func<T, int, IList<T>, bool> filter = null,
+            IScheduler scheduler = null)
+            : this(comparer, filter, scheduler)
+        {
+            this.source = source;
+            Listen(source);
+        }
+
+        public IObservable<T> Listen(IObservable<T> obs)
+        {
+            sourceQueue = obs
+                .Do(data => queue.Enqueue(data));
+
+            source = Observable
+                .Generate(StartQueue(),
+                    i => !disposed,
+                    i => i+1,
+                    i => GetFromQueue(),
+                    i => delay
+                )
+                .Where(data => data != null)
+                .ObserveOn(scheduler)
+                .Select(x => ProcessItem(x, original))
+                .Select(SortedNone)
+                .Select(SortedAdd)
+                .Select(SortedInsert)
+                .Select(SortedMove)
+                .Select(CheckFilter)
+                .Select(FilteredAdd)
+                .Select(data =>
+                {
+                    data.Index = GetIndex(data.Item);
+                    data.IndexPivot = GetLiveListPivot(data.Position, data.List);
+                    return data;
+                })
+                .Select(FilteredNone)
+                .Select(FilteredInsert)
+                .Select(FilteredMove)
+                .TimeInterval()
+                .Select(data =>
+                {
+                    var time = data.Interval;
+                    if (time > requestedDelay + fuzziness)
+                        delay -= time - requestedDelay;
+                    else if (time < requestedDelay + fuzziness)
+                        delay += requestedDelay - time;
+                    delay = delay < TimeSpan.Zero ? TimeSpan.Zero : delay;
+                    return data.Value.Item;
+                })
+                .Publish()
+                .RefCount();
+
+            return source;
+        }
+
+        public IDisposable Subscribe()
+        {
+            if (source == null)
+                throw new InvalidOperationException("No source observable has been set. Call Listen or pass an observable to the constructor");
+            if (disposed)
+                throw new ObjectDisposedException("TrackingCollection");
+            disposables.Add(source.Subscribe());
+            return this;
+        }
+
+        public IDisposable Subscribe(Action<T> onNext, Action onCompleted)
+        {
+            if (source == null)
+                throw new InvalidOperationException("No source observable has been set. Call Listen or pass an observable to the constructor");
+            if (disposed)
+                throw new ObjectDisposedException("TrackingCollection");
+            disposables.Add(source.Subscribe(onNext, onCompleted));
+            return this;
+        }
+
+        public void AddItem(T item)
+        {
+            if (disposed)
+                throw new ObjectDisposedException("TrackingCollection");
+            queue.Enqueue(item);
+        }
+
+        public void RemoveItem(T item)
+        {
+            if (disposed)
+                throw new ObjectDisposedException("TrackingCollection");
+            var position = GetIndexUnfiltered(original, item);
+            var index = GetIndex(item);
+            original.Remove(item);
+            InternalRemoveItem(item);
+            RecalculateFilter(original, index, position, original.Count);
+        }
+
+        void InternalAddItem(T item)
+        {
+            Add(item);
+        }
+
+        void InternalInsertItem(T item, int position)
+        {
+            Insert(position, item);
+        }
+
+        void InternalRemoveItem(T item)
+        {
+            Remove(item);
+        }
+
+        void InternalMoveItem(T item, int positionFrom, int positionTo)
+        {
+            Move(positionFrom, positionFrom < positionTo ? positionTo - 1 : positionTo);
+        }
+
+        ActionData CheckFilter(ActionData data)
+        {
+            data.IsIncluded = true;
+            if (filter != null)
+                data.IsIncluded = filter(data.Item, data.Position, this);
+            return data;
+        }
+
+        int StartQueue()
+        {
+            disposables.Add(sourceQueue.Subscribe(_ => itemCount++));
+            return 0;
+        }
+
+        T GetFromQueue()
+        {
+            try
+            {
+                T d = null;
+                if (queue?.TryDequeue(out d) ?? false)
+                    return d;
+            }
+            catch { }
+            return null;
+        }
+
+        ActionData ProcessItem(T item, IList<T> list)
+        {
+            ActionData ret;
+
+            var idx = list.IndexOf(item);
+            if (idx >= 0)
+            {
+                var old = list[idx];
+                var comparison = 0;
+                if (comparer != null)
+                    comparison = comparer(item, old);
+
+                // no sorting to be done, just replacing the element in-place
+                if (comparer == null || comparison == 0)
+                    ret = new ActionData(TheAction.None, item, null, idx, idx, list);
+                else
+                    // element has moved, locate new position
+                    ret = new ActionData(TheAction.Move, item, old, comparison, idx, list);
+            }
+            // the element doesn't exist yet
+            // figure out whether we're larger than the last element or smaller than the first or
+            // if we have to place the new item somewhere in the middle
+            else if (comparer != null && list.Count > 0)
+            {
+                if (comparer(list[0], item) >= 0)
+                    ret = new ActionData(TheAction.Insert, item, null, 0, -1, list);
+
+                else if (comparer(list[list.Count - 1], item) <= 0)
+                    ret = new ActionData(TheAction.Add, item, null, list.Count, -1, list);
+
+                // this happens if the original observable is not sorted, or it's sorting order doesn't
+                // match the comparer that has been set
+                else
+                {
+                    idx = BinarySearch(list, 0, item, comparer);
+                    if (idx < 0)
+                        ret = new ActionData(TheAction.Add, item, null, list.Count, -1, list);
+
+                    else
+                        ret = new ActionData(TheAction.Insert, item, null, idx, -1, list);
+                }
+            }
+            else
+                ret = new ActionData(TheAction.Add, item, null, list.Count, -1, list);
+            return ret;
+        }
+
+        ActionData SortedNone(ActionData data)
+        {
+            if (data.TheAction != TheAction.None)
+                return data;
+            data.List[data.OldPosition].CopyFrom(data.Item);
+            return data;
+        }
+
+        ActionData SortedAdd(ActionData data)
+        {
+            if (data.TheAction != TheAction.Add)
+                return data;
+            data.List.Add(data.Item);
+            return data;
+        }
+
+        ActionData SortedInsert(ActionData data)
+        {
+            if (data.TheAction != TheAction.Insert)
+                return data;
+            data.List.Insert(data.Position, data.Item);
+            return data;
+        }
+        ActionData SortedMove(ActionData data)
+        {
+            if (data.TheAction != TheAction.Move)
+                return data;
+            data.List[data.OldPosition].CopyFrom(data.Item);
+            var pos = FindNewPositionForItem(data.OldPosition, data.Position < 0, data.List, comparer);
+            return new ActionData(data.TheAction, data.Item, data.OldItem, pos, data.OldPosition, data.List);
+        }
+
+        ActionData FilteredNone(ActionData data)
+        {
+            if (data.TheAction != TheAction.None)
+                return data;
+
+            // nothing has changed as far as the live list is concerned
+            if ((data.IsIncluded && data.Index >= 0) || !data.IsIncluded && data.Index < 0)
+                return data;
+
+            // wasn't on the live list, but it is now
+            if (data.IsIncluded && data.Index < 0)
+            {
+                InternalInsertItem(data.Item, data.IndexPivot);
+                RecalculateFilter(data.List, data.IndexPivot + 1, data.Position + 1, data.List.Count);
+            }
+
+            else if (!data.IsIncluded && data.Index >= 0)
+            {
+                InternalRemoveItem(data.Item);
+                RecalculateFilter(data.List, data.Index, data.Position, data.List.Count);
+            }
+            return data;
+        }
+
+        ActionData FilteredAdd(ActionData data)
+        {
+            if (data.TheAction != TheAction.Add)
+                return data;
+            if (data.IsIncluded)
+                InternalAddItem(data.Item);
+            return data;
+        }
+
+        ActionData FilteredInsert(ActionData data)
+        {
+            if (data.TheAction != TheAction.Insert)
+                return data;
+            if (data.IsIncluded)
+                InsertAndRecalculate(data.List, data.Item, data.IndexPivot, data.Position);
+            else
+                RecalculateFilter(data.List, data.IndexPivot, data.Position, data.List.Count);
+            return data;
+        }
+
+        ActionData FilteredMove(ActionData data)
+        {
+            if (data.TheAction != TheAction.Move)
+                return data;
+
+            if (filter == null)
+            {
+                MoveAndRecalculate(data.List, data.Item, data.Index, data.IndexPivot, data.OldPosition, data.Position);
+                return data;
+            }
+
+            int start, end;
+            start = end = -1;
+            if (Count > 0)
+            {
+                start = GetIndexUnfiltered(data.List, this[0]);
+                end = GetIndexUnfiltered(data.List, this[Count - 1]);
+            }
+
+            var filteredListChanged = Count > 0 && (!filter(this[0], start, this) || !filter(this[Count - 1], end, this));
+
+            // it wasn't included before in the live list, and still isn't and the live list hasn't been affected
+            // nothing to do
+            if (((!data.IsIncluded && data.Index < 0) || (data.IsIncluded && data.Index == data.IndexPivot)) && !filteredListChanged)
+                return data;
+
+            // the move caused the object to not be visible in the live list anymore, so remove
+            if (!data.IsIncluded)
+                RemoveAndRecalculate(data.List, data.Item, data.Index, data.Position);
+
+            // the move caused the object to become visible in the live list, insert it
+            // and recalculate all the other things on the live list after this one
+            else if (data.Index < 0)
+                InsertAndRecalculate(data.List, data.Item, data.IndexPivot, data.Position);
+
+            else if (filteredListChanged)
+                RecalculateFilter(data.List, data.IndexPivot, start, data.List.Count);
+
+            // move the object
+            else
+                MoveAndRecalculate(data.List, data.Item, data.Index, data.IndexPivot, data.OldPosition, data.Position);
+
+            return data;
+        }
+
+        /// <summary>
+        /// Insert an object into the live list at liveListCurrentIndex and recalculate
+        /// positions for all objects after that
+        /// </summary>
+        /// <param name="list">The unfiltered, sorted list of items</param>
+        /// <param name="item"></param>
+        /// <param name="index"></param>
+        /// <param name="position">Index of the unfiltered, sorted list</param>
+        void InsertAndRecalculate(IList<T> list, T item, int index, int position)
+        {
+            InternalInsertItem(item, index);
+            position++;
+            index++;
+            RecalculateFilter(list, index, position, list.Count);
+        }
+
+        /// <summary>
+        /// Remove an object from the live list at index and recalculate positions
+        /// for all objects after that
+        /// </summary>
+        /// <param name="list">The unfiltered, sorted list of items</param>
+        /// <param name="item"></param>
+        /// <param name="index">The index in the live list</param>
+        /// <param name="position">The position in the sorted, unfiltered list</param>
+        void RemoveAndRecalculate(IList<T> list, T item, int index, int position)
+        {
+            InternalRemoveItem(item);
+            RecalculateFilter(list, index, position, list.Count);
+        }
+
+        /// <summary>
+        /// Move an object in the live list and recalculate positions
+        /// for all objects between the bounds of the affected indexes
+        /// </summary>
+        /// <param name="list">The unfiltered, sorted list of items</param>
+        /// <param name="obj"></param>
+        /// <param name="from">Index in the live list where the object is</param>
+        /// <param name="to">Index in the live list where the object is going to be</param>
+        /// <param name="fromPosition">Index in the unfiltered, sorted list corresponding to "from"</param>
+        /// <param name="toPosition">Index in the unfiltered, sorted list corresponding to "to"</param>
+        void MoveAndRecalculate(IList<T> list, T item, int from, int to, int fromPosition, int toPosition)
+        {
+            InternalMoveItem(item, from, to);
+            RecalculateFilter(list, to, toPosition < fromPosition ? toPosition : fromPosition,
+                toPosition < fromPosition ? fromPosition : toPosition);
+        }
+
+
+        /// <summary>
+        /// Go through the list of objects and adjust their "visibility" in the live list
+        /// (by removing/inserting as needed). 
+        /// </summary>
+        /// <param name="index">Index in the live list corresponding to the start index of the object list</param>
+        /// <param name="start">Start index of the object list</param>
+        /// <param name="end">End index of the object list</param>
+        void RecalculateFilter(IList<T> list, int index, int start, int end)
+        {
+            if (filter == null)
+                return;
+            for (int i = start; i < end; i++)
+            {
+                var obj = list[i];
+                var idx = GetIndex(obj);
+                var isIncluded = filter(obj, i, this);
+
+                // element is still included and hasn't changed positions
+                if (isIncluded && idx >= 0)
+                    index++;
+                // element is included and wasn't before
+                else if (isIncluded && idx < 0)
+                {
+                    if (index == Count)
+                        InternalAddItem(obj);
+                    else
+                        InternalInsertItem(obj, index);
+                    index++;
+                }
+                // element is not included and was before
+                else if (!isIncluded && idx >= 0)
+                    InternalRemoveItem(obj);
+            }
+        }
+
+        /// <summary>
+        /// Get the index in the live list of an object at position.
+        /// This will scan back to the beginning of the live list looking for
+        /// the closest left neighbour and return the position after that.
+        /// </summary>
+        /// <param name="position">The index of an object in the unfiltered, sorted list that we want to map to the filtered live list</param>
+        /// <param name="list">The unfiltered, sorted list of items</param>
+        /// <returns></returns>
+        int GetLiveListPivot(int position, IList<T> list)
+        {
+            var index = -1;
+            if (position > 0)
+            {
+                for (int i = position - 1; i >= 0; i--)
+                {
+                    index = GetIndex(list[i]);
+                    if (index >= 0)
+                    {
+                        // found an element to the left of what we want, so now we know the index where to start
+                        // manipulating the list
+                        index++;
+                        break;
+                    }
+                }
+            }
+
+            // there was no element to the left of the one we want, start at the beginning of the live list
+            if (index < 0)
+                index = 0;
+            return index;
+        }
+
+        int GetIndex(T item)
+        {
+            return IndexOf(item);
+        }
+
+        int GetIndexUnfiltered(IList<T> list, T item)
+        {
+            return list.IndexOf(item);
+        }
+
+        void RaiseMoveEvent(T item, int from, int to)
+        {
+            OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+            OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Move, item, to, from));
+        }
+
+        void RaiseResetEvent()
+        {
+            OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+            OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        }
+
+        static int FindNewPositionForItem(int idx, bool lower, IList<T> list, Func<T, T, int> comparer)
+        {
+            var i = idx;
+            if (lower) // replacing element has lower sorting order, find the correct spot towards the beginning
+                for (var pos = i - 1; i > 0 && comparer(list[i], list[pos]) < 0; i--, pos--)
+                    Swap(list, i, pos);
+            else // replacing element has higher sorting order, find the correct spot towards the end
+                for (var pos = i + 1; i < list.Count - 1 && comparer(list[i], list[pos]) > 0; i++, pos++)
+                    Swap(list, i, pos);
+            return i;
+        }
+
+        /// <summary>
+        /// Swap two elements
+        /// </summary>
+        /// <param name="list"></param>
+        /// <param name="left"></param>
+        /// <param name="right"></param>
+        static void Swap(IList<T> list, int left, int right)
+        {
+            var l = list[left];
+            list[left] = list[right];
+            list[right] = l;
+        }
+
+        /// <summary>
+        /// Does a binary search for <paramref name="item"/>, and returns
+        /// its position. If <paramref name="item"/> is not on the list, returns
+        /// where it should be.
+        /// </summary>
+        /// <param name="list"></param>
+        /// <param name="start"></param>
+        /// <param name="item"></param>
+        /// <param name="comparer"></param>
+        /// <returns></returns>
+        static int BinarySearch(IList<T> list, int start, T item, Func<T, T, int> comparer)
+        {
+            int end = start + list.Count - 1;
+            while (start <= end)
+            {
+                var pivot = start + (end - start >> 1);
+                var result = comparer(list[pivot], item);
+                if (result == 0)
+                    return pivot;
+                if (result < 0)
+                {
+                    if (pivot > 0 && comparer(list[pivot + 1], item) >= 0)
+                        return pivot;
+                    start = pivot + 1;
+                }
+                else
+                {
+                    if (pivot < list.Count - 1 && comparer(list[pivot - 1], item) <= 0)
+                        return pivot;
+                    end = pivot - 1;
+                }
+            }
+            return start;
+        }
+
+        static IScheduler GetScheduler(IScheduler scheduler)
+        {
+            Dispatcher d = null;
+            if (scheduler == null)
+                d = Dispatcher.FromThread(Thread.CurrentThread);
+            return scheduler ?? (d != null ? new DispatcherScheduler(d) : null as IScheduler) ?? CurrentThreadScheduler.Instance;
+        }
+
+        bool disposed = false;
+        void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (!disposed)
+                {
+                    disposed = true;
+                    queue = null;
+                    disposables.Dispose();
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected class ActionData : Tuple<TheAction, T, T, int, int, IList<T>>
+        {
+            public TheAction TheAction => Item1;
+            public T Item => Item2;
+            public T OldItem => Item3;
+            public int Position => Item4;
+            public int OldPosition => Item5;
+            public IList<T> List => Item6;
+
+            public int Index { get; set; }
+            public int IndexPivot { get; set; }
+            public bool IsIncluded { get; set; }
+
+            public ActionData(TheAction action, T item, T oldItem, int position, int oldPosition, IList<T> list)
+                : base(action, item, oldItem, position, oldPosition, list)
+            {
+            }
+        }
+    }
+}
