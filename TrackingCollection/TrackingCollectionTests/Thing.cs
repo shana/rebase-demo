@@ -80,7 +80,7 @@ namespace TrackingCollectionTests
 
         public override string ToString()
         {
-            return string.Format("id:{0} title:{1} created:{2:u} updated:{3:u}", Number, Title, CreatedAt, UpdatedAt);
+            return string.Format("id:{0} ({4}) updated:{3:u} title:{1} created:{2:u}", Number, Title, CreatedAt, UpdatedAt, base.GetHashCode());
         }
     }
 }

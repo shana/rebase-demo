@@ -232,7 +232,8 @@ namespace GitHub.Collections
                 if (comparer == null || comparison == 0)
                     ret = new ActionData(TheAction.None, item, null, idx, idx, list);
                 else
-                    // element has moved, locate new position
+                    // element has moved, save the original object, because we want to update its contents and move it
+                    // but not overwrite the instance.
                     ret = new ActionData(TheAction.Move, item, old, comparison, idx, list);
             }
             // the element doesn't exist yet
@@ -290,9 +291,10 @@ namespace GitHub.Collections
         {
             if (data.TheAction != TheAction.Move)
                 return data;
-            data.List[data.OldPosition].CopyFrom(data.Item);
+            data.OldItem.CopyFrom(data.Item);
             var pos = FindNewPositionForItem(data.OldPosition, data.Position < 0, data.List, comparer);
-            return new ActionData(data.TheAction, data.Item, data.OldItem, pos, data.OldPosition, data.List);
+            // the old item is the one moving around
+            return new ActionData(data.TheAction, data.OldItem, null, pos, data.OldPosition, data.List);
         }
 
         ActionData FilteredNone(ActionData data)
