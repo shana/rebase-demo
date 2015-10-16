@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Linq;
 using System.Reactive;
 using System.Reactive.Concurrency;
 using System.Reactive.Disposables;
@@ -158,23 +159,73 @@ namespace GitHub.Collections
             RecalculateFilter(original, index, position, original.Count);
         }
 
+        Dictionary<T, int> objectToIndex = new Dictionary<T, int>();
         void InternalAddItem(T item)
         {
+            // optimization
+            objectToIndex.Add(item, Count);
+            // end of optimization
             Add(item);
         }
 
         void InternalInsertItem(T item, int position)
         {
+            // optimization
+            var keys = objectToIndex.Keys.ToList();
+            foreach (var o in keys)
+            {
+                if (objectToIndex[o] >= position)
+                    objectToIndex[o]++;
+            }
+            objectToIndex.Add(item, position);
+            // end of optimization
             Insert(position, item);
         }
 
         void InternalRemoveItem(T item)
         {
+            // optimization
+            var idx = objectToIndex[item];
+            objectToIndex.Remove(item);
+            var keys = objectToIndex.Keys.ToList();
+            foreach (var o in keys)
+            {
+                if (objectToIndex[o] > idx)
+                    objectToIndex[o]--;
+            }
+            // end of optimization
+
             Remove(item);
         }
 
         void InternalMoveItem(T item, int positionFrom, int positionTo)
         {
+            // optimization
+            if (positionFrom != positionTo)
+            {
+                objectToIndex.Remove(item);
+                var idxTo = positionFrom < positionTo ? positionTo - 1 : positionTo;
+                var keys = objectToIndex.Keys.ToList();
+                if (positionFrom < idxTo)
+                {
+                    foreach (var o in keys)
+                    {
+                        if (objectToIndex[o] > positionFrom && objectToIndex[o] <= idxTo)
+                            objectToIndex[o]--;
+                    }
+                }
+                else
+                {
+                    foreach (var o in keys)
+                    {
+                        if (objectToIndex[o] >= idxTo && objectToIndex[o] < positionFrom)
+                            objectToIndex[o]++;
+                    }
+                }
+                objectToIndex.Add(item, idxTo);
+            }
+            // end of optimization
+
             Move(positionFrom, positionFrom < positionTo ? positionTo - 1 : positionTo);
         }
 
@@ -561,7 +612,12 @@ namespace GitHub.Collections
 
         int GetIndex(T item)
         {
-            return IndexOf(item);
+            // optimization
+            int idx = -1;
+            if (objectToIndex.TryGetValue(item, out idx))
+                return idx;
+            return -1;
+            //return IndexOf(item);
         }
 
         int GetIndexUnfiltered(IList<T> list, T item)
