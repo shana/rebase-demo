@@ -317,7 +317,7 @@ namespace GitHub.Collections
 
             // was on the live list, it's not anymore
             else if (!data.IsIncluded && data.Index >= 0)
-                RemoveAndRecalculate(data.List, data.Item, data.Index, data.Position, false);
+                RemoveAndRecalculate(data.List, data.Item, data.Index, data.Position);
 
             return data;
         }
@@ -348,49 +348,45 @@ namespace GitHub.Collections
             if (data.TheAction != TheAction.Move)
                 return data;
 
-            int start, end;
-            start = end = -1;
+            var start = data.OldPosition < data.Position ? data.OldPosition : data.Position;
+            var end = data.Position > data.OldPosition ? data.Position : data.OldPosition;
 
             // if there's no filter, the filtered list is equal to the unfiltered list, just move
             if (filter == null)
             {
-                start = data.OldPosition < data.Position ? data.OldPosition : data.Position;
-                end = data.Position > data.OldPosition ? data.Position : data.OldPosition;
-                MoveAndRecalculate(data.List, data.Item, data.Index, data.IndexPivot, start, end, false);
+                MoveAndRecalculate(data.List, data.Item, data.Index, data.IndexPivot, start, end);
                 return data;
             }
 
+            var filteredListChanged = false;
+            var startPosition = Int32.MaxValue;
+            var endPosition = -1;
             // check if the filtered list is affected indirectly by the move (eg., if the filter involves position of items,
             // moving an item outside the bounds of the filter can affect the items being currently shown/hidden)
             if (Count > 0)
             {
-                start = GetIndexUnfiltered(data.List, this[0]);
-                end = GetIndexUnfiltered(data.List, this[Count - 1]);
-            }
-
-            // true if the filtered list has been indirectly affected by this objects' move
-            var filteredListChanged = Count > 0 && (!filter(this[0], start, this) || !filter(this[Count - 1], end, this));
-
-            // the filtered list hasn't been affected, so we just need to reevaluate the filter from
-            // the position of the affected item
-            if (!filteredListChanged)
-            {
-                start = data.OldPosition < data.Position ? data.OldPosition : data.Position;
-                end = data.Position > data.OldPosition ? data.Position : data.OldPosition;
+                startPosition = GetIndexUnfiltered(data.List, this[0]);
+                endPosition = GetIndexUnfiltered(data.List, this[Count - 1]);
+                // true if the filtered list has been indirectly affected by this objects' move
+                filteredListChanged = (!filter(this[0], startPosition, this) || !filter(this[Count - 1], endPosition, this));
             }
 
             // the move caused the object to not be visible in the live list anymore, so remove
             if (!data.IsIncluded && data.Index >= 0)
-                RemoveAndRecalculate(data.List, data.Item, data.Index, start, filteredListChanged);
+                RemoveAndRecalculate(data.List, data.Item, filteredListChanged ? 0 : data.Index, filteredListChanged ? startPosition : start);
 
             // the move caused the object to become visible in the live list, insert it
-            // and recalculate all the other things on the live list after this one
+            // and recalculate all the other things on the live list from the start position
             else if (data.IsIncluded && data.Index < 0)
+            {
+                start = startPosition < start ? startPosition : start;
+                end = endPosition > end ? endPosition : end;
                 InsertAndRecalculate(data.List, data.Item, data.IndexPivot, start, filteredListChanged);
+            }
 
             // move the object and recalculate the filter between the bounds of the move
             else if (data.IsIncluded)
-                MoveAndRecalculate(data.List, data.Item, data.Index, data.IndexPivot, start, end, filteredListChanged);
+                MoveAndRecalculate(data.List, data.Item, data.Index, data.IndexPivot, start, end);
 
             // recalculate the filter for every item, there's no way of telling what changed
             else if (filteredListChanged)
@@ -421,7 +417,7 @@ namespace GitHub.Collections
 
         /// <summary>
         /// Insert an object into the live list at liveListCurrentIndex and recalculate
-        /// positions for all objects after that
+        /// positions for all objects from the position
         /// </summary>
         /// <param name="list">The unfiltered, sorted list of items</param>
         /// <param name="item"></param>
@@ -434,8 +430,28 @@ namespace GitHub.Collections
                 index = 0; // reevaluate filter from the start of the filtered list
             else
             {
-                index++;
-                position++;
+                // if the item in position is different from the item we're inserting,
+                // that means that this insertion might require some filter reevaluation of items
+                // before the one we're inserting. We need to figure out if the item in position
+                // is in the filtered list, and if it is, then that's where we need to start
+                // reevaluating the filter. If it isn't, then there's no need to reevaluate from
+                // there
+                var needToBacktrack = false;
+                if (!Equals(item, list[position]))
+                {
+                    var idx = GetIndex(list[position]);
+                    if (idx >= 0)
+                    {
+                        needToBacktrack = true;
+                        index = idx;
+                    }
+                }
+
+                if (!needToBacktrack)
+                {
+                    index++;
+                    position++;
+                }
             }
             RecalculateFilter(list, index, position, list.Count);
         }
@@ -448,11 +464,9 @@ namespace GitHub.Collections
         /// <param name="item"></param>
         /// <param name="index">The index in the live list</param>
         /// <param name="position">The position in the sorted, unfiltered list</param>
-        void RemoveAndRecalculate(IList<T> list, T item, int index, int position, bool rescanAll)
+        void RemoveAndRecalculate(IList<T> list, T item, int index, int position)
         {
             InternalRemoveItem(item);
-            if (rescanAll)
-                index = 0; // reevaluate filter from the start of the filtered list
             RecalculateFilter(list, index, position, list.Count);
         }
 
@@ -466,19 +480,14 @@ namespace GitHub.Collections
         /// <param name="to">Index in the live list where the object is going to be</param>
         /// <param name="start">Index in the unfiltered, sorted list to start reevaluating the filter</param>
         /// <param name="end">Index in the unfiltered, sorted list to end reevaluating the filter</param>
-        void MoveAndRecalculate(IList<T> list, T item, int from, int to, int start, int end, bool rescanAll)
+        void MoveAndRecalculate(IList<T> list, T item, int from, int to, int start, int end)
         {
             if (start > end)
                 throw new ArgumentOutOfRangeException(nameof(start), "Start cannot be bigger than end, evaluation of the filter goes forward.");
 
             InternalMoveItem(item, from, to);
-            if (rescanAll)
-                to = 0; // reevaluate filter from the start of the filtered list
-            else
-            {
-                to++;
-                start++;
-            }
+            to++;
+            start++;
             RecalculateFilter(list, to, start, end);
         }
 
