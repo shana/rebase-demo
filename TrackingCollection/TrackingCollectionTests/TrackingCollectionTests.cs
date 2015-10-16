@@ -118,7 +118,7 @@ public class Tests : TestBase
         var col = new TrackingCollection<Thing>(
             Observable.Never<Thing>(),
             OrderedComparer<Thing>.OrderBy(x => x.UpdatedAt).Compare);
-        col.ProcessingDelay = new TimeSpan(0);
+        col.ProcessingDelay = TimeSpan.Zero;
 
         var now = new DateTimeOffset(0, TimeSpan.FromTicks(0));
         var list1 = new List<Thing>(Enumerable.Range(1, count).Select(i =>
@@ -184,7 +184,7 @@ public class Tests : TestBase
             Observable.Never<Thing>(),
             OrderedComparer<Thing>.OrderBy(x => x.UpdatedAt).Compare,
             (item, position, list) => true);
-        col.ProcessingDelay = new TimeSpan(0);
+        col.ProcessingDelay = TimeSpan.Zero;
 
         var now = new DateTimeOffset(0, TimeSpan.FromTicks(0));
         var list1 = new List<Thing>(Enumerable.Range(1, count).Select(i =>
@@ -229,6 +229,8 @@ public class Tests : TestBase
             col.AddItem(l);
 
         sub.Wait();
+        Dump(col);
+        Dump(col.DebugInternalList);
         Assert.Equal(list2.Count, col.Count);
 
         j = 0;
@@ -255,7 +257,7 @@ public class Tests : TestBase
             Observable.Never<Thing>(),
             OrderedComparer<Thing>.OrderBy(x => x.UpdatedAt).Compare,
             (item, position, list) => position >= 2 && position <= 4);
-        col.ProcessingDelay = new TimeSpan(0);
+        col.ProcessingDelay = TimeSpan.Zero;
 
         var sub = new Subject<Thing>();
 
@@ -343,7 +345,7 @@ public class Tests : TestBase
             Observable.Never<Thing>(),
             OrderedComparer<Thing>.OrderBy(x => x.UpdatedAt).Compare,
             (item, position, list) => item.UpdatedAt >= now + TimeSpan.FromMinutes(3) && item.UpdatedAt <= now + TimeSpan.FromMinutes(5));
-        col.ProcessingDelay = new TimeSpan(0);
+        col.ProcessingDelay = TimeSpan.Zero;
 
         var evt = new ManualResetEvent(false);
         col.Subscribe(t =>
@@ -428,7 +430,7 @@ public class Tests : TestBase
         var col = new TrackingCollection<Thing>(
             Observable.Never<Thing>(),
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare);
-        col.ProcessingDelay = new TimeSpan(0);
+        col.ProcessingDelay = TimeSpan.Zero;
 
         var evt = new ManualResetEvent(false);
         col.Subscribe(t =>
@@ -516,7 +518,7 @@ public class Tests : TestBase
         var col = new TrackingCollection<Thing>(
             Observable.Never<Thing>(),
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare);
-        col.ProcessingDelay = new TimeSpan(0);
+        col.ProcessingDelay = TimeSpan.Zero;
 
         var evt = new ManualResetEvent(false);
         col.Subscribe(t =>
@@ -653,34 +655,31 @@ public class Tests : TestBase
             list1.ToObservable(),
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare,
             (item, position, list) => item.Title.Equals("Run 2"));
-        col.ProcessingDelay = new TimeSpan(0);
-
-        var sub = new Subject<Thing>();
+        col.ProcessingDelay = TimeSpan.Zero;
 
         count = 0;
+
+        var evt = new ManualResetEvent(false);
         col.Subscribe(t =>
         {
-            if (count == list1.Count)
-                return;
-            sub.OnNext(t);
-            count++;
-            if (count == list1.Count)
-                sub.OnCompleted();
+            if (++count == list1.Count)
+                evt.Set();
         }, () => { });
 
-        sub.Wait();
+        evt.WaitOne();
+        evt.Reset();
 
         Assert.Equal(total, count);
         Assert.Equal(0, col.Count);
 
-        sub = new Subject<Thing>();
         count = 0;
 
         // add new items
         foreach (var l in list2)
             col.AddItem(l);
 
-        sub.Wait();
+        evt.WaitOne();
+        evt.Reset();
 
         Assert.Equal(total, count);
         Assert.Equal(total, col.Count);
@@ -708,34 +707,34 @@ public class Tests : TestBase
             list1.ToObservable(),
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare,
             (item, position, list) => item.Title.Equals("Run 2"));
-        col.ProcessingDelay = new TimeSpan(0);
-
-        var sub = new Subject<Thing>();
+        col.ProcessingDelay = TimeSpan.Zero;
 
         count = 0;
+        var evt = new ManualResetEvent(false);
+        var start = DateTimeOffset.UtcNow;
         col.Subscribe(t =>
         {
-            if (count == list1.Count)
-                return;
-            sub.OnNext(t);
-            count++;
-            if (count == list1.Count)
-                sub.OnCompleted();
+            if (++count == list1.Count)
+                evt.Set();
         }, () => { });
 
-        sub.Wait();
+        evt.WaitOne();
+        Assert.InRange((DateTimeOffset.UtcNow - start).TotalMilliseconds, 0, 100);
+        evt.Reset();
 
         Assert.Equal(total, count);
         Assert.Equal(0, col.Count);
 
-        sub = new Subject<Thing>();
         count = 0;
 
+        start = DateTimeOffset.UtcNow;
         // add new items
         foreach (var l in list2)
             col.AddItem(l);
 
-        sub.Wait();
+        evt.WaitOne();
+        Assert.InRange((DateTimeOffset.UtcNow - start).TotalMilliseconds, 0, 200);
+        evt.Reset();
 
         Assert.Equal(total, count);
         Assert.Equal(total, col.Count);
@@ -763,34 +762,30 @@ public class Tests : TestBase
             list1.ToObservable(),
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare,
             (item, position, list) => item.Title.Equals("Run 2"));
-        col.ProcessingDelay = new TimeSpan(0);
-
-        var sub = new Subject<Thing>();
+        col.ProcessingDelay = TimeSpan.Zero;
 
         count = 0;
+        var evt = new ManualResetEvent(false);
         col.Subscribe(t =>
         {
-            if (count == list1.Count)
-                return;
-            sub.OnNext(t);
-            count++;
-            if (count == list1.Count)
-                sub.OnCompleted();
+            if (++count == list1.Count)
+                evt.Set();
         }, () => { });
 
-        sub.Wait();
+        evt.WaitOne();
+        evt.Reset();
 
         Assert.Equal(total, count);
         Assert.Equal(0, col.Count);
 
-        sub = new Subject<Thing>();
         count = 0;
 
         // add new items
         foreach (var l in list2)
             col.AddItem(l);
 
-        sub.Wait();
+        evt.WaitOne();
+        evt.Reset();
 
         Assert.Equal(total, count);
         Assert.Equal(total, col.Count);
@@ -810,12 +805,12 @@ public class Tests : TestBase
         var col = new TrackingCollection<Thing>(
             source,
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare);
-        col.ProcessingDelay = new TimeSpan(0);
+        col.ProcessingDelay = TimeSpan.Zero;
 
         var count = 0;
         var expectedCount = 0;
-        var evt = new ManualResetEvent(false);
 
+        var evt = new ManualResetEvent(false);
         col.Subscribe(t =>
         {
             if (++count == expectedCount)
@@ -997,7 +992,7 @@ public class Tests : TestBase
             source,
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare,
             (item, position, list) => true);
-        col.ProcessingDelay = new TimeSpan(0);
+        col.ProcessingDelay = TimeSpan.Zero;
 
         var count = 0;
         var expectedCount = 0;
@@ -1184,7 +1179,7 @@ public class Tests : TestBase
             source,
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare,
             (item, position, list) => item.UpdatedAt.Minute >= 6 && item.UpdatedAt.Minute <= 12);
-        col.ProcessingDelay = new TimeSpan(0);
+        col.ProcessingDelay = TimeSpan.Zero;
 
         var count = 0;
         var expectedCount = 0;
@@ -1335,7 +1330,7 @@ public class Tests : TestBase
             source,
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare,
             (item, position, list) => position >= 2 && position <= 4);
-        col.ProcessingDelay = new TimeSpan(0);
+        col.ProcessingDelay = TimeSpan.Zero;
 
         var count = 0;
         var expectedCount = 0;
@@ -1483,7 +1478,7 @@ public class Tests : TestBase
             source,
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare,
             (item, position, list) => position == 1 || (position >= 3 && position <= 4));
-        col.ProcessingDelay = new TimeSpan(0);
+        col.ProcessingDelay = TimeSpan.Zero;
 
         var count = 0;
         var expectedCount = 0;
@@ -1644,7 +1639,7 @@ public class Tests : TestBase
             source,
             OrderedComparer<Thing>.OrderBy(x => x.UpdatedAt).Compare,
             (item, position, list) => (position >= 1 && position <= 2) || (position >= 5 && position <= 7));
-        col.ProcessingDelay = new TimeSpan(0);
+        col.ProcessingDelay = TimeSpan.Zero;
 
         var count = 0;
         var expectedCount = 0;

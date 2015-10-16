@@ -126,6 +126,10 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="TrackingCollectionTests\TrackingCollectionTests.csproj">
+      <Project>{7b835a7d-cf94-45e8-b191-96f5a4fe26a8}</Project>
+      <Name>TrackingCollectionTests</Name>
+    </ProjectReference>
     <ProjectReference Include="TrackingCollection\TrackingCollection.csproj">
       <Project>{234932da-e21a-4291-a8d0-8c36def24826}</Project>
       <Name>TrackingCollection</Name>
