@@ -1,8 +1,8 @@
 ﻿
-Microsoft Visual Studio Solution File, Format Version 12.00
+Microsoft Visual Studio Solution File, Format Version 14.00
 # Visual Studio 14
 VisualStudioVersion = 14.0.23023.0
-MinimumVisualStudioVersion = 10.0.40219.1
+MinimumVisualStudioVersion = 14.0.23023.0
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrackingCollectionUITestHelper", "TrackingCollectionUITestHelper.csproj", "{07BEFA71-602E-4704-895F-5CEA9E185351}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrackingCollectionTests", "TrackingCollectionTests\TrackingCollectionTests.csproj", "{7B835A7D-CF94-45E8-B191-96F5A4FE26A8}"
