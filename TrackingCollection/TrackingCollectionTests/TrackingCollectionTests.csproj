@@ -92,7 +92,17 @@
     </Otherwise>
   </Choose>
   <ItemGroup>
+    <Compile Include="Xunit\ConditionalFactAttribute.cs" />
+    <Compile Include="Xunit\DelayedMessageBus.cs" />
     <Compile Include="Program.cs" />
+    <Compile Include="Xunit\RetryFactAttribute.cs" />
+    <Compile Include="Xunit\RetryFactDiscoverer.cs" />
+    <Compile Include="Xunit\RetryTestCase.cs" />
+    <Compile Include="Xunit\STAFactAttribute.cs" />
+    <Compile Include="Xunit\STAFactDiscoverer.cs" />
+    <Compile Include="Xunit\STATestCase.cs" />
+    <Compile Include="Xunit\STATheoryAttribute.cs" />
+    <Compile Include="Xunit\STATheoryDiscoverer.cs" />
     <Compile Include="Thing.cs" />
     <Compile Include="TrackingCollectionTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
