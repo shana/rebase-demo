@@ -24,7 +24,11 @@ namespace TrackingCollectionTests
     {
         public static void Main()
         {
+#if DEBUG
             new TrackingTests(new Output()).OrderByDoesntMatchOriginalOrderTimings();
+#else
+            new TrackingTests().OrderByDoesntMatchOriginalOrderTimings();
+#endif
         }
     }
 }

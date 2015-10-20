@@ -12,35 +12,21 @@ EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
-		NoBackingDict|Any CPU = NoBackingDict|Any CPU
 		Release|Any CPU = Release|Any CPU
-		ReleaseNoDict|Any CPU = ReleaseNoDict|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{07BEFA71-602E-4704-895F-5CEA9E185351}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{07BEFA71-602E-4704-895F-5CEA9E185351}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{07BEFA71-602E-4704-895F-5CEA9E185351}.NoBackingDict|Any CPU.ActiveCfg = NoBackingDict|Any CPU
-		{07BEFA71-602E-4704-895F-5CEA9E185351}.NoBackingDict|Any CPU.Build.0 = NoBackingDict|Any CPU
 		{07BEFA71-602E-4704-895F-5CEA9E185351}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{07BEFA71-602E-4704-895F-5CEA9E185351}.Release|Any CPU.Build.0 = Release|Any CPU
-		{07BEFA71-602E-4704-895F-5CEA9E185351}.ReleaseNoDict|Any CPU.ActiveCfg = ReleaseNoDict|Any CPU
-		{07BEFA71-602E-4704-895F-5CEA9E185351}.ReleaseNoDict|Any CPU.Build.0 = ReleaseNoDict|Any CPU
 		{7B835A7D-CF94-45E8-B191-96F5A4FE26A8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{7B835A7D-CF94-45E8-B191-96F5A4FE26A8}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{7B835A7D-CF94-45E8-B191-96F5A4FE26A8}.NoBackingDict|Any CPU.ActiveCfg = Release|Any CPU
-		{7B835A7D-CF94-45E8-B191-96F5A4FE26A8}.NoBackingDict|Any CPU.Build.0 = Release|Any CPU
 		{7B835A7D-CF94-45E8-B191-96F5A4FE26A8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7B835A7D-CF94-45E8-B191-96F5A4FE26A8}.Release|Any CPU.Build.0 = Release|Any CPU
-		{7B835A7D-CF94-45E8-B191-96F5A4FE26A8}.ReleaseNoDict|Any CPU.ActiveCfg = Release|Any CPU
-		{7B835A7D-CF94-45E8-B191-96F5A4FE26A8}.ReleaseNoDict|Any CPU.Build.0 = Release|Any CPU
 		{234932DA-E21A-4291-A8D0-8C36DEF24826}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{234932DA-E21A-4291-A8D0-8C36DEF24826}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{234932DA-E21A-4291-A8D0-8C36DEF24826}.NoBackingDict|Any CPU.ActiveCfg = Release|Any CPU
-		{234932DA-E21A-4291-A8D0-8C36DEF24826}.NoBackingDict|Any CPU.Build.0 = Release|Any CPU
 		{234932DA-E21A-4291-A8D0-8C36DEF24826}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{234932DA-E21A-4291-A8D0-8C36DEF24826}.Release|Any CPU.Build.0 = Release|Any CPU
-		{234932DA-E21A-4291-A8D0-8C36DEF24826}.ReleaseNoDict|Any CPU.ActiveCfg = Release|Any CPU
-		{234932DA-E21A-4291-A8D0-8C36DEF24826}.ReleaseNoDict|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
