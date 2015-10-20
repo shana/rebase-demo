@@ -90,7 +90,7 @@ namespace GitHub.Collections
 #else
             this.scheduler = scheduler ?? RxApp.MainThreadScheduler;
 #endif
-            this.comparer = comparer ?? new Func<T, T, int>((o, p) => Comparer<T>.Default.Compare(o, p));
+            this.comparer = comparer ?? Comparer<T>.Default.Compare;
             this.filter = filter;
         }
 
@@ -634,18 +634,6 @@ namespace GitHub.Collections
             if (index < 0)
                 index = 0;
             return index;
-        }
-
-        void RaiseMoveEvent(T item, int from, int to)
-        {
-            OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
-            OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Move, item, to, from));
-        }
-
-        void RaiseResetEvent()
-        {
-            OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
-            OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
         }
 
         /// <summary>
