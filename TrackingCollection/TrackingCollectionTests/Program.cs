@@ -24,7 +24,7 @@ namespace TrackingCollectionTests
     {
         public static void Main()
         {
-            new Tests(new Output()).OrderByDoesntMatchOriginalOrderTimings();
+            new TrackingTests(new Output()).OrderByDoesntMatchOriginalOrderTimings();
         }
     }
 }
