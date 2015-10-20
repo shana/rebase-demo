@@ -19,10 +19,20 @@ using System.Windows.Threading;
 
 namespace GitHub.Collections
 {
-    public class TrackingCollection<T> : ObservableCollection<T>, IDisposable
-        where T : class, ICopyable<T>
+    /// <summary>
+    /// TrackingCollection is a specialization of ObservableCollection that gets items from
+    /// an observable sequence and updates its contents in such a way that two updates to
+    /// the same object (as defined by an Equals call) will result in one object on
+    /// the list being updated (as opposed to having two different instances of the object
+    /// added to the list).
+    /// It is always sorted, either via the supplied comparer or using the default comparer
+    /// for T
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    public class TrackingCollection<T> : ObservableCollection<T>, ITrackingCollection<T>, IDisposable
+        where T : class, ICopyable<T>, IComparable<T>
     {
-        protected enum TheAction
+        enum TheAction
         {
             None,
             Move,
@@ -30,7 +40,7 @@ namespace GitHub.Collections
             Insert
         }
 
-        CompositeDisposable disposables = new CompositeDisposable();
+        readonly CompositeDisposable disposables = new CompositeDisposable();
         IObservable<T> source;
         IObservable<T> sourceQueue;
         Func<T, T, int> comparer;
@@ -39,15 +49,23 @@ namespace GitHub.Collections
         int itemCount = 0;
         ConcurrentQueue<T> queue;
 
-        List<T> original = new List<T>();
+        readonly List<T> original = new List<T>();
 #if DEBUG
         public IList<T> DebugInternalList => original;
 #endif
 
+        // lookup optimizations
+        // for speeding up IndexOf in the unfiltered list
+        readonly Dictionary<T, int> sortedIndexCache = new Dictionary<T, int>();
+
+        // for speeding up IndexOf in the filtered list
+        readonly Dictionary<T, int> filteredIndexCache = new Dictionary<T, int>();
+
         TimeSpan delay;
         TimeSpan requestedDelay;
         TimeSpan fuzziness;
-        public TimeSpan ProcessingDelay {
+        public TimeSpan ProcessingDelay
+        {
             get { return requestedDelay; }
             set
             {
@@ -55,7 +73,7 @@ namespace GitHub.Collections
                 delay = value;
             }
         }
-        
+
 
         public TrackingCollection()
         {
@@ -72,9 +90,8 @@ namespace GitHub.Collections
 #else
             this.scheduler = scheduler ?? RxApp.MainThreadScheduler;
 #endif
-            this.comparer = comparer;
+            this.comparer = comparer ?? new Func<T, T, int>((o, p) => Comparer<T>.Default.Compare(o, p));
             this.filter = filter;
-            original = new List<T>();
         }
 
         public TrackingCollection(IObservable<T> source,
@@ -87,15 +104,25 @@ namespace GitHub.Collections
             Listen(source);
         }
 
+        /// <summary>
+        /// Sets up an observable as source for the collection.
+        /// </summary>
+        /// <param name="obs"></param>
+        /// <returns>An observable that will return all the items that are
+        /// fed via the original observer, for further processing by user code
+        /// if desired</returns>
         public IObservable<T> Listen(IObservable<T> obs)
         {
+            if (disposed)
+                throw new ObjectDisposedException("TrackingCollection");
+
             sourceQueue = obs
                 .Do(data => queue.Enqueue(data));
 
             source = Observable
                 .Generate(StartQueue(),
                     i => !disposed,
-                    i => i+1,
+                    i => i + 1,
                     i => GetFromQueue(),
                     i => delay
                 )
@@ -119,6 +146,30 @@ namespace GitHub.Collections
                 .RefCount();
 
             return source;
+        }
+
+        /// <summary>
+        /// Set a new comparer for the existing data. This will cause the
+        /// collection to be resorted and refiltered.
+        /// </summary>
+        /// <param name="theComparer">The comparer method for sorting, or null if not sorting</param>
+        public void SetComparer(Func<T, T, int> theComparer)
+        {
+            if (disposed)
+                throw new ObjectDisposedException("TrackingCollection");
+            SetAndRecalculateSort(theComparer);
+            SetAndRecalculateFilter(filter);
+        }
+
+        /// <summary>
+        /// Set a new filter. This will cause the collection to be filtered
+        /// </summary>
+        /// <param name="theFilter">The new filter, or null to not have any filtering</param>
+        public void SetFilter(Func<T, int, IList<T>, bool> theFilter)
+        {
+            if (disposed)
+                throw new ObjectDisposedException("TrackingCollection");
+            SetAndRecalculateFilter(theFilter);
         }
 
         public IDisposable Subscribe()
@@ -152,81 +203,56 @@ namespace GitHub.Collections
         {
             if (disposed)
                 throw new ObjectDisposedException("TrackingCollection");
-            var position = GetIndexUnfiltered(original, item);
-            var index = GetIndex(item);
+            var position = GetIndexUnfiltered(item);
+            if (position < 0)
+                return;
+            // unfiltered list update
             original.Remove(item);
+            sortedIndexCache.Remove(item);
+            UpdateIndexCache(original.Count - 1, position, original, sortedIndexCache);
+
+            // filtered list update
+            var index = GetIndexFiltered(item);
             InternalRemoveItem(item);
             RecalculateFilter(original, index, position, original.Count);
         }
 
-        Dictionary<T, int> objectToIndex = new Dictionary<T, int>();
-        void InternalAddItem(T item)
+        void SetAndRecalculateSort(Func<T, T, int> compare)
         {
-            // optimization
-            objectToIndex.Add(item, Count);
-            // end of optimization
-            Add(item);
+            comparer = compare;
+            var list = filter != null ? original : Items as List<T>;
+            RecalculateSort(list, 0, list.Count);
         }
 
-        void InternalInsertItem(T item, int position)
+        void RecalculateSort(List<T> list, int start, int end)
         {
-            // optimization
-            var keys = objectToIndex.Keys.ToList();
-            foreach (var o in keys)
+            if (comparer == null)
+                return;
+
+            list.Sort(start, end, new LambdaComparer<T>(comparer));
+
+            // if there's a filter, then it's going to trigger events and we don't need to manually trigger them
+            if (filter == null)
             {
-                if (objectToIndex[o] >= position)
-                    objectToIndex[o]++;
+                OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+                OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
             }
-            objectToIndex.Add(item, position);
-            // end of optimization
-            Insert(position, item);
         }
 
-        void InternalRemoveItem(T item)
+        void SetAndRecalculateFilter(Func<T, int, IList<T>, bool> newFilter)
         {
-            // optimization
-            var idx = objectToIndex[item];
-            objectToIndex.Remove(item);
-            var keys = objectToIndex.Keys.ToList();
-            foreach (var o in keys)
-            {
-                if (objectToIndex[o] > idx)
-                    objectToIndex[o]--;
-            }
-            // end of optimization
+            if (filter == null && newFilter == null)
+                return; // nothing to do
 
-            Remove(item);
+            ClearItems();
+            filter = newFilter;
+            RecalculateFilter(original, 0, 0, original.Count);
         }
 
-        void InternalMoveItem(T item, int positionFrom, int positionTo)
+        protected override void ClearItems()
         {
-            // optimization
-            if (positionFrom != positionTo)
-            {
-                objectToIndex.Remove(item);
-                var idxTo = positionFrom < positionTo ? positionTo - 1 : positionTo;
-                var keys = objectToIndex.Keys.ToList();
-                if (positionFrom < idxTo)
-                {
-                    foreach (var o in keys)
-                    {
-                        if (objectToIndex[o] > positionFrom && objectToIndex[o] <= idxTo)
-                            objectToIndex[o]--;
-                    }
-                }
-                else
-                {
-                    foreach (var o in keys)
-                    {
-                        if (objectToIndex[o] >= idxTo && objectToIndex[o] < positionFrom)
-                            objectToIndex[o]++;
-                    }
-                }
-                objectToIndex.Add(item, idxTo);
-            }
-            // end of optimization
-
-            Move(positionFrom, positionFrom < positionTo ? positionTo - 1 : positionTo);
+            filteredIndexCache.Clear();
+            base.ClearItems();
         }
 
         ActionData CheckFilter(ActionData data)
@@ -255,20 +281,18 @@ namespace GitHub.Collections
             return null;
         }
 
-        ActionData ProcessItem(T item, IList<T> list)
+        ActionData ProcessItem(T item, List<T> list)
         {
             ActionData ret;
 
-            var idx = list.IndexOf(item);
+            var idx = GetIndexUnfiltered(item);
             if (idx >= 0)
             {
                 var old = list[idx];
-                var comparison = 0;
-                if (comparer != null)
-                    comparison = comparer(item, old);
+                var comparison = comparer(item, old);
 
                 // no sorting to be done, just replacing the element in-place
-                if (comparer == null || comparison == 0)
+                if (comparison == 0)
                     ret = new ActionData(TheAction.None, item, null, idx, idx, list);
                 else
                     // element has moved, save the original object, because we want to update its contents and move it
@@ -278,7 +302,7 @@ namespace GitHub.Collections
             // the element doesn't exist yet
             // figure out whether we're larger than the last element or smaller than the first or
             // if we have to place the new item somewhere in the middle
-            else if (comparer != null && list.Count > 0)
+            else if (list.Count > 0)
             {
                 if (comparer(list[0], item) >= 0)
                     ret = new ActionData(TheAction.Insert, item, null, 0, -1, list);
@@ -290,10 +314,11 @@ namespace GitHub.Collections
                 // match the comparer that has been set
                 else
                 {
-                    idx = BinarySearch(list, 0, item, comparer);
+                    idx = BinarySearch(list, item, comparer);
                     if (idx < 0)
+                        idx = ~idx;
+                    if (idx == list.Count)
                         ret = new ActionData(TheAction.Add, item, null, list.Count, -1, list);
-
                     else
                         ret = new ActionData(TheAction.Insert, item, null, idx, -1, list);
                 }
@@ -324,6 +349,7 @@ namespace GitHub.Collections
             if (data.TheAction != TheAction.Insert)
                 return data;
             data.List.Insert(data.Position, data.Item);
+            UpdateIndexCache(data.Position, data.List.Count, data.List, sortedIndexCache);
             return data;
         }
         ActionData SortedMove(ActionData data)
@@ -331,7 +357,7 @@ namespace GitHub.Collections
             if (data.TheAction != TheAction.Move)
                 return data;
             data.OldItem.CopyFrom(data.Item);
-            var pos = FindNewPositionForItem(data.OldPosition, data.Position < 0, data.List, comparer);
+            var pos = FindNewPositionForItem(data.OldPosition, data.Position < 0, data.List, comparer, sortedIndexCache);
             // the old item is the one moving around
             return new ActionData(data.TheAction, data.OldItem, null, pos, data.OldPosition, data.List);
         }
@@ -348,7 +374,7 @@ namespace GitHub.Collections
 
         ActionData CalculateIndexes(ActionData data)
         {
-            data.Index = GetIndex(data.Item);
+            data.Index = GetIndexFiltered(data.Item);
             data.IndexPivot = GetLiveListPivot(data.Position, data.List);
             return data;
         }
@@ -405,7 +431,7 @@ namespace GitHub.Collections
             // if there's no filter, the filtered list is equal to the unfiltered list, just move
             if (filter == null)
             {
-                MoveAndRecalculate(data.List, data.Item, data.Index, data.IndexPivot, start, end);
+                MoveAndRecalculate(data.List, data.Index, data.IndexPivot, start, end);
                 return data;
             }
 
@@ -416,8 +442,8 @@ namespace GitHub.Collections
             // moving an item outside the bounds of the filter can affect the items being currently shown/hidden)
             if (Count > 0)
             {
-                startPosition = GetIndexUnfiltered(data.List, this[0]);
-                endPosition = GetIndexUnfiltered(data.List, this[Count - 1]);
+                startPosition = GetIndexUnfiltered(this[0]);
+                endPosition = GetIndexUnfiltered(this[Count - 1]);
                 // true if the filtered list has been indirectly affected by this objects' move
                 filteredListChanged = (!filter(this[0], startPosition, this) || !filter(this[Count - 1], endPosition, this));
             }
@@ -437,7 +463,7 @@ namespace GitHub.Collections
 
             // move the object and recalculate the filter between the bounds of the move
             else if (data.IsIncluded)
-                MoveAndRecalculate(data.List, data.Item, data.Index, data.IndexPivot, start, end);
+                MoveAndRecalculate(data.List, data.Index, data.IndexPivot, start, end);
 
             // recalculate the filter for every item, there's no way of telling what changed
             else if (filteredListChanged)
@@ -490,7 +516,7 @@ namespace GitHub.Collections
                 var needToBacktrack = false;
                 if (!Equals(item, list[position]))
                 {
-                    var idx = GetIndex(list[position]);
+                    var idx = GetIndexFiltered(list[position]);
                     if (idx >= 0)
                     {
                         needToBacktrack = true;
@@ -526,17 +552,17 @@ namespace GitHub.Collections
         /// for all objects between the bounds of the affected indexes
         /// </summary>
         /// <param name="list">The unfiltered, sorted list of items</param>
-        /// <param name="obj"></param>
         /// <param name="from">Index in the live list where the object is</param>
         /// <param name="to">Index in the live list where the object is going to be</param>
         /// <param name="start">Index in the unfiltered, sorted list to start reevaluating the filter</param>
         /// <param name="end">Index in the unfiltered, sorted list to end reevaluating the filter</param>
-        void MoveAndRecalculate(IList<T> list, T item, int from, int to, int start, int end)
+        /// <param name="obj"></param>
+        void MoveAndRecalculate(IList<T> list, int from, int to, int start, int end)
         {
             if (start > end)
                 throw new ArgumentOutOfRangeException(nameof(start), "Start cannot be bigger than end, evaluation of the filter goes forward.");
 
-            InternalMoveItem(item, from, to);
+            InternalMoveItem(from, to);
             to++;
             start++;
             RecalculateFilter(list, to, start, end);
@@ -557,7 +583,7 @@ namespace GitHub.Collections
             for (int i = start; i < end; i++)
             {
                 var obj = list[i];
-                var idx = GetIndex(obj);
+                var idx = GetIndexFiltered(obj);
                 var isIncluded = filter(obj, i, this);
 
                 // element is still included and hasn't changed positions
@@ -593,7 +619,7 @@ namespace GitHub.Collections
             {
                 for (int i = position - 1; i >= 0; i--)
                 {
-                    index = GetIndex(list[i]);
+                    index = GetIndexFiltered(list[i]);
                     if (index >= 0)
                     {
                         // found an element to the left of what we want, so now we know the index where to start
@@ -610,21 +636,6 @@ namespace GitHub.Collections
             return index;
         }
 
-        int GetIndex(T item)
-        {
-            // optimization
-            int idx = -1;
-            if (objectToIndex.TryGetValue(item, out idx))
-                return idx;
-            return -1;
-            //return IndexOf(item);
-        }
-
-        int GetIndexUnfiltered(IList<T> list, T item)
-        {
-            return list.IndexOf(item);
-        }
-
         void RaiseMoveEvent(T item, int from, int to)
         {
             OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
@@ -637,24 +648,134 @@ namespace GitHub.Collections
             OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
         }
 
-        static int FindNewPositionForItem(int idx, bool lower, IList<T> list, Func<T, T, int> comparer)
+        /// <summary>
+        /// Adds an item to the filtered list
+        /// </summary>
+        void InternalAddItem(T item)
+        {
+            Add(item);
+        }
+
+        /// <summary>
+        /// Inserts an item into the filtered list
+        /// </summary>
+        void InternalInsertItem(T item, int position)
+        {
+            Insert(position, item);
+        }
+
+        protected override void InsertItem(int index, T item)
+        {
+            filteredIndexCache.Add(item, index);
+            UpdateIndexCache(index, Count, Items, filteredIndexCache);
+            base.InsertItem(index, item);
+        }
+
+        /// <summary>
+        /// Removes an item from the filtered list
+        /// </summary>
+        void InternalRemoveItem(T item)
+        {
+            int idx = -1;
+            if (!filteredIndexCache.TryGetValue(item, out idx))
+                return;
+            RemoveItem(idx);
+        }
+
+        protected override void RemoveItem(int index)
+        {
+            filteredIndexCache.Remove(this[index]);
+            UpdateIndexCache(Count - 1, index, Items, filteredIndexCache);
+            base.RemoveItem(index);
+        }
+
+        /// <summary>
+        /// Moves an item in the filtered list
+        /// </summary>
+        void InternalMoveItem(int positionFrom, int positionTo)
+        {
+            positionTo = positionFrom < positionTo ? positionTo - 1 : positionTo;
+            Move(positionFrom, positionTo);
+        }
+
+        protected override void MoveItem(int oldIndex, int newIndex)
+        {
+            if (oldIndex != newIndex)
+            {
+                UpdateIndexCache(newIndex, oldIndex, Items, filteredIndexCache);
+                filteredIndexCache[this[oldIndex]] = newIndex;
+            }
+            base.MoveItem(oldIndex, newIndex);
+        }
+
+        /// <summary>
+        /// The filtered list always has a cache filled up with
+        /// all the items that are visible.
+        /// </summary>
+        int GetIndexFiltered(T item)
+        {
+            int idx = -1;
+            if (filteredIndexCache.TryGetValue(item, out idx))
+                return idx;
+            return -1;
+        }
+
+        /// <summary>
+        /// The unfiltered has a lazy cache that gets filled
+        /// up when something is looked up.
+        /// </summary>
+        /// <param name="item"></param>
+        /// <returns></returns>
+        int GetIndexUnfiltered(T item)
+        {
+            int ret = -1;
+            if (!sortedIndexCache.TryGetValue(item, out ret))
+            {
+                ret = original.IndexOf(item);
+                if (ret >= 0)
+                    sortedIndexCache.Add(item, ret);
+            }
+            return ret;
+        }
+
+        /// <summary>
+        /// When items get moved/inserted/deleted, update the indexes in the cache.
+        /// If start < end, we're inserting an item and want to shift all the indexes
+        /// between start and end to the right (+1)
+        /// If start > end, we're removing an item and want to shift all
+        /// indexes to the left (-1).
+        /// </summary>
+        static void UpdateIndexCache(int start, int end, IList<T> list, Dictionary<T, int> indexCache)
+        {
+            var change = end < start ? -1 : 1;
+            for (int i = start; i != end; i += change)
+                if (indexCache.ContainsKey(list[i]))
+                    indexCache[list[i]] += change;
+        }
+
+        static int FindNewPositionForItem(int idx, bool lower, IList<T> list, Func<T, T, int> comparer, Dictionary<T, int> indexCache)
         {
             var i = idx;
             if (lower) // replacing element has lower sorting order, find the correct spot towards the beginning
                 for (var pos = i - 1; i > 0 && comparer(list[i], list[pos]) < 0; i--, pos--)
+                {
                     Swap(list, i, pos);
+                    SwapIndex(list, i, 1, indexCache);
+                }
+
             else // replacing element has higher sorting order, find the correct spot towards the end
                 for (var pos = i + 1; i < list.Count - 1 && comparer(list[i], list[pos]) > 0; i++, pos++)
+                {
                     Swap(list, i, pos);
+                    SwapIndex(list, i, -1, indexCache);
+                }
+            indexCache[list[i]] = i;
             return i;
         }
 
         /// <summary>
         /// Swap two elements
         /// </summary>
-        /// <param name="list"></param>
-        /// <param name="left"></param>
-        /// <param name="right"></param>
         static void Swap(IList<T> list, int left, int right)
         {
             var l = list[left];
@@ -662,41 +783,18 @@ namespace GitHub.Collections
             list[right] = l;
         }
 
-        /// <summary>
-        /// Does a binary search for <paramref name="item"/>, and returns
-        /// its position. If <paramref name="item"/> is not on the list, returns
-        /// where it should be.
-        /// </summary>
-        /// <param name="list"></param>
-        /// <param name="start"></param>
-        /// <param name="item"></param>
-        /// <param name="comparer"></param>
-        /// <returns></returns>
-        static int BinarySearch(IList<T> list, int start, T item, Func<T, T, int> comparer)
+        static void SwapIndex(IList<T> list, int pos, int change, Dictionary<T, int> cache)
         {
-            int end = start + list.Count - 1;
-            while (start <= end)
-            {
-                var pivot = start + (end - start >> 1);
-                var result = comparer(list[pivot], item);
-                if (result == 0)
-                    return pivot;
-                if (result < 0)
-                {
-                    if (pivot > 0 && comparer(list[pivot + 1], item) >= 0)
-                        return pivot;
-                    start = pivot + 1;
-                }
-                else
-                {
-                    if (pivot < list.Count - 1 && comparer(list[pivot - 1], item) <= 0)
-                        return pivot;
-                    end = pivot - 1;
-                }
-            }
-            return start;
+            if (cache.ContainsKey(list[pos]))
+                cache[list[pos]] += change;
         }
 
+        static int BinarySearch(List<T> list, T item, Func<T, T, int> comparer)
+        {
+            return list.BinarySearch(item, new LambdaComparer<T>(comparer));
+        }
+
+#if DISABLE_REACTIVEUI
         static IScheduler GetScheduler(IScheduler scheduler)
         {
             Dispatcher d = null;
@@ -704,6 +802,7 @@ namespace GitHub.Collections
                 d = Dispatcher.FromThread(Thread.CurrentThread);
             return scheduler ?? (d != null ? new DispatcherScheduler(d) : null as IScheduler) ?? CurrentThreadScheduler.Instance;
         }
+#endif
 
         bool disposed = false;
         void Dispose(bool disposing)
@@ -725,20 +824,20 @@ namespace GitHub.Collections
             GC.SuppressFinalize(this);
         }
 
-        protected class ActionData : Tuple<TheAction, T, T, int, int, IList<T>>
+        class ActionData : Tuple<TheAction, T, T, int, int, List<T>>
         {
             public TheAction TheAction => Item1;
             public T Item => Item2;
             public T OldItem => Item3;
             public int Position => Item4;
             public int OldPosition => Item5;
-            public IList<T> List => Item6;
+            public List<T> List => Item6;
 
             public int Index { get; set; }
             public int IndexPivot { get; set; }
             public bool IsIncluded { get; set; }
 
-            public ActionData(TheAction action, T item, T oldItem, int position, int oldPosition, IList<T> list)
+            public ActionData(TheAction action, T item, T oldItem, int position, int oldPosition, List<T> list)
                 : base(action, item, oldItem, position, oldPosition, list)
             {
             }
