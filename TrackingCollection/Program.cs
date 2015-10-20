@@ -5,7 +5,6 @@ using System.ComponentModel;
 using System.Linq;
 using System.Reactive.Linq;
 using System.Threading;
-using TrackingCollectionTests;
 
 namespace ObservableTests
 {
