@@ -61,6 +61,7 @@
     <Reference Include="WindowsBase" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="EnumerableExtensions.cs" />
     <Compile Include="ICopyable.cs" />
     <Compile Include="ITrackingCollection.cs" />
     <Compile Include="OrderedComparer.cs" />
