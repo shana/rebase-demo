@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Xunit.Abstractions;
 
 namespace TrackingCollectionTests
 {
@@ -24,11 +23,11 @@ namespace TrackingCollectionTests
     {
         public static void Main()
         {
-#if DEBUG
-            new TrackingTests(new Output()).OrderByDoesntMatchOriginalOrderTimings();
-#else
-            new TrackingTests().OrderByDoesntMatchOriginalOrderTimings();
-#endif
+//#if DEBUG
+//            new TrackingTests(new Output()).OrderByDoesntMatchOriginalOrderTimings();
+//#else
+//            new TrackingTests().OrderByDoesntMatchOriginalOrderTimings();
+//#endif
         }
     }
 }
