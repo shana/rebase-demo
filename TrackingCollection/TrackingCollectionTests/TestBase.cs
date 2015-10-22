@@ -18,16 +18,20 @@ public class TestBase
         }
     }
 
-    protected readonly ITestOutputHelper output = new Output();
-    protected StringBuilder testOutput = new StringBuilder();
+    readonly ITestOutputHelper output;
+    protected readonly StringBuilder testOutput = new StringBuilder();
     protected DateTimeOffset Now = new DateTimeOffset(0, TimeSpan.FromTicks(0));
 
-#if DEBUG
-    //public TestBase(ITestOutputHelper output)
-    //{
-    //    this.output = output;
-    //}
-#endif
+    public TestBase()
+    {
+        output = new Output();
+    }
+
+    public TestBase(ITestOutputHelper output)
+    {
+        this.output = output;
+    }
+
 
     protected void Dump(string msg)
     {
@@ -37,8 +41,8 @@ public class TestBase
 
     protected void Dump(object prefix, object thing)
     {
-        output?.WriteLine(string.Format("{0} - {1}", prefix, thing.ToString()));
-        testOutput.AppendLine(string.Format("{0} - {1}", prefix, thing.ToString()));
+        output?.WriteLine($"{prefix} - {thing}");
+        testOutput.AppendLine($"{prefix} - {thing}");
     }
 
     protected void Dump(object thing)
@@ -72,51 +76,26 @@ public class TestBase
 
     protected Thing GetThing(int id)
     {
-        return new Thing()
-        {
-            Number = id
-        };
+        return new Thing { Number = id };
     }
 
     protected Thing GetThing(int id, int minutes)
     {
-        return new Thing()
-        {
-            Number = id,
-            Title = "Run 1",
-            CreatedAt = Now + TimeSpan.FromMinutes(minutes),
-            UpdatedAt = Now + TimeSpan.FromMinutes(minutes)
-        };
+        return new Thing { Number = id, Title = "Run 1", CreatedAt = Now + TimeSpan.FromMinutes(minutes), UpdatedAt = Now + TimeSpan.FromMinutes(minutes) };
     }
 
     protected Thing GetThing(int id, int minutesc, int minutesu)
     {
-        return new Thing()
-        {
-            Number = id,
-            Title = "Run 1",
-            CreatedAt = Now + TimeSpan.FromMinutes(minutesc),
-            UpdatedAt = Now + TimeSpan.FromMinutes(minutesu)
-        };
+        return new Thing { Number = id, Title = "Run 1", CreatedAt = Now + TimeSpan.FromMinutes(minutesc), UpdatedAt = Now + TimeSpan.FromMinutes(minutesu) };
     }
 
     protected Thing GetThing(int id, string title)
     {
-        return new Thing()
-        {
-            Number = id,
-            Title = title,
-        };
+        return new Thing { Number = id, Title = "Run 1" };
     }
 
     protected Thing GetThing(int id, int minutesc, int minutesu, string title)
     {
-        return new Thing()
-        {
-            Number = id,
-            Title = title,
-            CreatedAt = Now + TimeSpan.FromMinutes(minutesc),
-            UpdatedAt = Now + TimeSpan.FromMinutes(minutesu)
-        };
+        return new Thing { Number = id, Title = title, CreatedAt = Now + TimeSpan.FromMinutes(minutesc), UpdatedAt = Now + TimeSpan.FromMinutes(minutesu) };
     }
 }
