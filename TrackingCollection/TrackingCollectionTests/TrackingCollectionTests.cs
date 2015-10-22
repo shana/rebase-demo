@@ -290,7 +290,7 @@ public class TrackingTests : TestBase
     }
 
 
-    [Test]
+    [Test, Category("Timings")]
     public void ProcessingDelayPingsRegularly()
     {
         int count, total;
@@ -414,7 +414,7 @@ public class TrackingTests : TestBase
         col.Dispose();
     }
 
-    [Test]
+    [Test, Category("Timings")]
     public void OrderByDoesntMatchOriginalOrderTimings()
     {
         var count = 0;
@@ -465,7 +465,7 @@ public class TrackingTests : TestBase
     }
 
     [Test]
-    public void OrderByMatchesOriginalOrderTimings()
+    public void OrderByMatchesOriginalOrder()
     {
         var count = 0;
         var total = 1000;
