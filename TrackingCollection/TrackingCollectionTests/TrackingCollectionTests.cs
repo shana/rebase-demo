@@ -11,20 +11,11 @@ using GitHub.Collections;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
-using System.Diagnostics;
 using NUnit.Framework;
 
 [TestFixture]
 public class TrackingTests : TestBase
 {
-#if DEBUG
-    //public TrackingTests(ITestOutputHelper output)
-    //    : base(output)
-    //{
-    //}
-#endif
-
-    //[Fact]
     [Test]
     public void OrderByUpdatedNoFilter()
     {
