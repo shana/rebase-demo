@@ -201,20 +201,21 @@ namespace GitHub.Collections
             queue.Enqueue(item);
         }
 
-        public void RemoveItem(T item)
+        public T RemoveItem(T item)
         {
             if (disposed)
                 throw new ObjectDisposedException("TrackingCollection");
 
             var position = GetIndexUnfiltered(item);
             if (position < 0)
-                return;
+                return null;
 
             var data = new ActionData(TheAction.Remove, item, null, position - 1, position, original);
             data = CheckFilter(data);
             data = CalculateIndexes(data);
             data = SortedRemove(data);
             data = FilteredRemove(data);
+            return data.Item;
         }
 
         void SetAndRecalculateSort(Func<T, T, int> theComparer)
@@ -235,7 +236,7 @@ namespace GitHub.Collections
             RecalculateFilter(original, 0, 0, original.Count, true);
         }
 
-#region Source pipeline processing
+        #region Source pipeline processing
 
         ActionData CheckFilter(ActionData data)
         {
@@ -430,13 +431,12 @@ namespace GitHub.Collections
 
             var filteredListChanged = false;
             var startPosition = Int32.MaxValue;
-            var endPosition = -1;
             // check if the filtered list is affected indirectly by the move (eg., if the filter involves position of items,
             // moving an item outside the bounds of the filter can affect the items being currently shown/hidden)
             if (Count > 0)
             {
                 startPosition = GetIndexUnfiltered(this[0]);
-                endPosition = GetIndexUnfiltered(this[Count - 1]);
+                var endPosition = GetIndexUnfiltered(this[Count - 1]);
                 // true if the filtered list has been indirectly affected by this objects' move
                 filteredListChanged = (!filter(this[0], startPosition, this) || !filter(this[Count - 1], endPosition, this));
             }
@@ -516,7 +516,7 @@ namespace GitHub.Collections
             return data.Value;
         }
 
-#endregion
+        #endregion
 
         /// <summary>
         /// Insert an object into the live list at liveListCurrentIndex and recalculate
@@ -698,19 +698,18 @@ namespace GitHub.Collections
         /// <summary>
         /// Removes an item from the filtered list
         /// </summary>
-        int InternalRemoveItem(T item)
+        void InternalRemoveItem(T item)
         {
             int idx;
             // this only happens if the cache is lazy, which is not the case at this time
             if (!filteredIndexCache.TryGetValue(item, out idx))
             {
                 Debug.Assert(false);
-                return -1;
+                return;
             }
 
             isChanging = true;
             RemoveItem(idx);
-            return idx;
         }
 
         protected override void RemoveItem(int index)
