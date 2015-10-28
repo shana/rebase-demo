@@ -49,7 +49,7 @@ namespace GitHub.Collections
         Func<T, T, int> comparer;
         Func<T, int, IList<T>, bool> filter;
         readonly IScheduler scheduler;
-        ConcurrentQueue<T> queue;
+        ConcurrentQueue<ActionData> queue;
 
         readonly List<T> original = new List<T>();
 #if DEBUG
@@ -78,7 +78,7 @@ namespace GitHub.Collections
 
         public TrackingCollection()
         {
-            queue = new ConcurrentQueue<T>();
+            queue = new ConcurrentQueue<ActionData>();
             ProcessingDelay = TimeSpan.FromMilliseconds(10);
             fuzziness = TimeSpan.FromMilliseconds(1);
         }
@@ -118,7 +118,7 @@ namespace GitHub.Collections
                 throw new ObjectDisposedException("TrackingCollection");
 
             sourceQueue = obs
-                .Do(data => queue.Enqueue(data));
+                .Do(data => queue.Enqueue(new ActionData(data)));
 
             source = Observable
                 .Generate(StartQueue(),
@@ -127,19 +127,23 @@ namespace GitHub.Collections
                     i => GetFromQueue(),
                     i => delay
                 )
-                .Where(data => data != null)
+                .Where(data => data.Item != null)
                 .ObserveOn(scheduler)
                 .Select(x => ProcessItem(x, original))
+                // if we're removing an item that doesn't exist, ignore it
+                .Where(data => !(data.TheAction == TheAction.Remove && data.OldPosition < 0))
                 .Select(SortedNone)
                 .Select(SortedAdd)
                 .Select(SortedInsert)
                 .Select(SortedMove)
+                .Select(SortedRemove)
                 .Select(CheckFilter)
                 .Select(FilteredAdd)
                 .Select(CalculateIndexes)
                 .Select(FilteredNone)
                 .Select(FilteredInsert)
                 .Select(FilteredMove)
+                .Select(FilteredRemove)
                 .TimeInterval()
                 .Select(UpdateProcessingDelay)
                 .Select(data => data.Item)
@@ -197,24 +201,14 @@ namespace GitHub.Collections
         {
             if (disposed)
                 throw new ObjectDisposedException("TrackingCollection");
-            queue.Enqueue(item);
+            queue.Enqueue(new ActionData(item));
         }
 
-        public T RemoveItem(T item)
+        public void RemoveItem(T item)
         {
             if (disposed)
                 throw new ObjectDisposedException("TrackingCollection");
-
-            var position = GetIndexUnfiltered(item);
-            if (position < 0)
-                return null;
-
-            var data = new ActionData(TheAction.Remove, original, item, null, position - 1, position);
-            data = CheckFilter(data);
-            data = CalculateIndexes(data);
-            data = SortedRemove(data);
-            data = FilteredRemove(data);
-            return data.Item;
+            queue.Enqueue(new ActionData(TheAction.Remove, item));
         }
 
         void SetAndRecalculateSort(Func<T, T, int> theComparer)
@@ -253,23 +247,28 @@ namespace GitHub.Collections
             return 0;
         }
 
-        T GetFromQueue()
+        ActionData GetFromQueue()
         {
             try
             {
-                T d = null;
+                ActionData d = ActionData.Default;
                 if (queue?.TryDequeue(out d) ?? false)
                     return d;
             }
             catch { }
-            return null;
+            return ActionData.Default;
         }
 
-        ActionData ProcessItem(T item, List<T> list)
+        ActionData ProcessItem(ActionData data, List<T> list)
         {
             ActionData ret;
+            T item = data.Item;
 
             var idx = GetIndexUnfiltered(item);
+
+            if (data.TheAction == TheAction.Remove)
+                return new ActionData(TheAction.Remove, original, item, null, idx - 1, idx);
+
             if (idx >= 0)
             {
                 var old = list[idx];
@@ -869,6 +868,8 @@ namespace GitHub.Collections
 
         struct ActionData
         {
+            public static readonly ActionData Default = new ActionData(null);
+
             readonly public TheAction TheAction;
             readonly public int Position;
             readonly public int OldPosition;
@@ -911,6 +912,19 @@ namespace GitHub.Collections
                       item, oldItem,
                       position, oldPosition,
                       -1, -1, false)
+            {
+            }
+
+            public ActionData(T item)
+                : this(TheAction.None, item)
+            {
+            }
+
+            public ActionData(TheAction action, T item)
+                : this(action, null,
+                        item, null,
+                        -1, -1,
+                        -1, -1, false)
             {
             }
 

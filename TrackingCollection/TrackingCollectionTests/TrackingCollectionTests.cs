@@ -671,7 +671,10 @@ public class TrackingTests : TestBase
             GetThing(4, 5),
         });
 
+        expectedCount = 14;
         col.RemoveItem(GetThing(1, 10));
+        evt.WaitOne();
+        evt.Reset();
         // check that list has {0:0:14,0:0:14,0:0:12,0:0:9,0:0:5}
         CollectionAssert.AreEqual(col, new List<Thing> {
             GetThing(6, 14),
@@ -856,7 +859,10 @@ public class TrackingTests : TestBase
             GetThing(4, 5),
         });
 
+        expectedCount = 14;
         col.RemoveItem(GetThing(1, 10));
+        evt.WaitOne();
+        evt.Reset();
         // check that list has {0:0:14,0:0:14,0:0:12,0:0:9,0:0:5}
         CollectionAssert.AreEqual(col, new List<Thing> {
             GetThing(6, 14),
@@ -1010,7 +1016,10 @@ public class TrackingTests : TestBase
             GetThing(2, 9),
         });
 
+        expectedCount = 14;
         col.RemoveItem(GetThing(1, 10));
+        evt.WaitOne();
+        evt.Reset();
         CollectionAssert.AreEqual(col, new List<Thing> {
             GetThing(5, 12),
             GetThing(2, 9),
@@ -1154,7 +1163,10 @@ public class TrackingTests : TestBase
             GetThing(2, 9),
         });
 
+        expectedCount = 14;
         col.RemoveItem(GetThing(1, 10));
+        evt.WaitOne();
+        evt.Reset();
         CollectionAssert.AreEqual(col, new List<Thing> {
             GetThing(5, 12),
             GetThing(2, 9),
@@ -1312,7 +1324,10 @@ public class TrackingTests : TestBase
             GetThing(2, 9),
         });
 
+        expectedCount = 15;
         col.RemoveItem(GetThing(1, 10));
+        evt.WaitOne();
+        evt.Reset();
         // check that list has {0:0:14,0:0:14,0:0:12,0:0:9,0:0:5}
         CollectionAssert.AreEqual(col, new List<Thing> {
             GetThing(3, 13),
@@ -1792,24 +1807,43 @@ public class TrackingTests : TestBase
             GetThing(7, 7),
         });
 
+        expectedCount = 12;
         col.RemoveItem(GetThing(2));
+        evt.WaitOne();
+        evt.Reset();
         CollectionAssert.AreEqual(col, new List<Thing> {
             GetThing(4, 4),
             GetThing(5, 5),
             GetThing(8, 8),
         });
 
+        expectedCount = 13;
         col.RemoveItem(GetThing(5));
+        evt.WaitOne();
+        evt.Reset();
         CollectionAssert.AreEqual(col, new List<Thing> {
             GetThing(4, 4),
             GetThing(6, 6),
             GetThing(9, 9),
         });
 
-        col.RemoveItem(GetThing(100));
+        col.SetFilter(null);
+
+        expectedCount = 14;
+        col.RemoveItem(GetThing(100)); // this one won't result in a new element from the observable
+        col.RemoveItem(GetThing(10));
+        evt.WaitOne();
+        evt.Reset();
+
+        Assert.AreEqual(8, col.Count);
         CollectionAssert.AreEqual(col, new List<Thing> {
+            GetThing(0, 0),
+            GetThing(1, 1),
+            GetThing(3, 3),
             GetThing(4, 4),
             GetThing(6, 6),
+            GetThing(7, 7),
+            GetThing(8, 8),
             GetThing(9, 9),
         });
         col.Dispose();
