@@ -132,7 +132,6 @@ namespace GitHub.Collections
                 .Where(data => data.Item != null)
                 .ObserveOn(scheduler)
                 .Select(data => {
-                    var now = DateTime.Now;
                     data = ProcessItem(data, original);
                     // if we're removing an item that doesn't exist, ignore it
                     if (data.TheAction == TheAction.Remove && data.OldPosition < 0)
