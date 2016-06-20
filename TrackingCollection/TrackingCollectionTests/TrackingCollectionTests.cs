@@ -12,6 +12,8 @@ using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
 using NUnit.Framework;
+using System.Diagnostics;
+using System.Reactive;
 
 [TestFixture]
 public class TrackingTests : TestBase
@@ -281,56 +283,6 @@ public class TrackingTests : TestBase
     }
 
 
-    [Test, Category("Timings")]
-    public void ProcessingDelayPingsRegularly()
-    {
-        int count, total;
-        count = total = 400;
-
-        var list1 = new List<Thing>(Enumerable.Range(1, count).Select(i => GetThing(i, i, count - i)).ToList());
-
-        var col = new TrackingCollection<Thing>(
-            list1.ToObservable().Delay(TimeSpan.FromMilliseconds(10)),
-            OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare);
-        col.ProcessingDelay = TimeSpan.FromMilliseconds(10);
-
-        var sub = new Subject<Thing>();
-        var times = new List<DateTimeOffset>();
-        sub.Subscribe(t =>
-        {
-            times.Add(DateTimeOffset.UtcNow);
-        });
-
-        count = 0;
-
-        var evt = new ManualResetEvent(false);
-        col.Subscribe(t =>
-        {
-            sub.OnNext(t);
-            if (++count == list1.Count)
-            {
-                sub.OnCompleted();
-                evt.Set();
-            }
-        }, () => { });
-
-
-        evt.WaitOne();
-        evt.Reset();
-
-        Assert.AreEqual(total, col.Count);
-
-        CollectionAssert.AreEqual(col, list1);
-
-        long totalTime = 0;
-
-        for (var j = 1; j < times.Count; j++)
-            totalTime += (times[j] - times[j - 1]).Ticks;
-        var avg = TimeSpan.FromTicks(totalTime / times.Count).TotalMilliseconds;
-        Assert.GreaterOrEqual(avg, 9);
-        Assert.LessOrEqual(avg, 12);
-        col.Dispose();
-    }
     [Test]
     public void NotInitializedCorrectlyThrows1()
     {
@@ -422,6 +374,7 @@ public class TrackingTests : TestBase
 
         var evt = new ManualResetEvent(false);
         var start = DateTimeOffset.UtcNow;
+
         col.Subscribe(t =>
         {
             if (++count == list1.Count)
@@ -430,7 +383,7 @@ public class TrackingTests : TestBase
 
         evt.WaitOne();
         var time = (DateTimeOffset.UtcNow - start).TotalMilliseconds;
-        Assert.LessOrEqual(time, 100);
+        Assert.LessOrEqual(time, 120);
         evt.Reset();
 
         Assert.AreEqual(total, count);
@@ -1591,7 +1544,7 @@ public class TrackingTests : TestBase
             GetThing(9, 9),
         });
 
-        col.SetFilter((item, position, list) => item.UpdatedAt < Now + TimeSpan.FromMinutes(8));
+        col.Filter = (item, position, list) => item.UpdatedAt < Now + TimeSpan.FromMinutes(8);
 
         CollectionAssert.AreEqual(col, new List<Thing> {
             GetThing(1, 1),
@@ -1642,7 +1595,7 @@ public class TrackingTests : TestBase
         evt.Reset();
         CollectionAssert.AreEqual(col, list1);
 
-        col.SetComparer(OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare);
+        col.Comparer = OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare;
 
         CollectionAssert.AreEqual(col, list1.Reverse<Thing>().ToArray());
         col.Dispose();
@@ -1767,7 +1720,7 @@ public class TrackingTests : TestBase
         evt.WaitOne();
         evt.Reset();
         CollectionAssert.AreEqual(col, list1);
-        col.SetComparer(null);
+        col.Comparer = null;
         CollectionAssert.AreEqual(col, list1.Reverse<Thing>().ToArray());
         col.Dispose();
     }
@@ -1787,7 +1740,6 @@ public class TrackingTests : TestBase
         var count = 0;
         var expectedCount = 0;
         var evt = new ManualResetEvent(false);
-
         col.Subscribe(t =>
         {
             if (++count == expectedCount)
@@ -1834,7 +1786,7 @@ public class TrackingTests : TestBase
             GetThing(9, 9),
         });
 
-        col.SetFilter(null);
+        col.Filter = null;
 
         expectedCount = 14;
         col.RemoveItem(GetThing(100)); // this one won't result in a new element from the observable
@@ -1861,8 +1813,8 @@ public class TrackingTests : TestBase
     {
         var col = new TrackingCollection<Thing>(Observable.Empty<Thing>());
         col.Dispose();
-        Assert.Throws<ObjectDisposedException>(() => col.SetFilter(null));
-        Assert.Throws<ObjectDisposedException>(() => col.SetComparer(null));
+        Assert.Throws<ObjectDisposedException>(() => col.Filter = null);
+        Assert.Throws<ObjectDisposedException>(() => col.Comparer = null);
         Assert.Throws<ObjectDisposedException>(() => col.Subscribe());
         Assert.Throws<ObjectDisposedException>(() => col.AddItem(GetThing(1)));
         Assert.Throws<ObjectDisposedException>(() => col.RemoveItem(GetThing(1)));
@@ -1932,26 +1884,55 @@ public class TrackingTests : TestBase
         Array.Sort(sortlist, new LambdaComparer<Thing>(OrderedComparer<Thing>.OrderByDescending(x => x.CreatedAt).Compare));
         CollectionAssert.AreEqual(sortlist.Take(5), col);
 
-        col.SetComparer(OrderedComparer<Thing>.OrderBy(x => x.Number).Compare);
+        col.Comparer = OrderedComparer<Thing>.OrderBy(x => x.Number).Compare;
         sortlist = list1.ToEnumerable().ToArray();
         Array.Sort(sortlist, new LambdaComparer<Thing>(OrderedComparer<Thing>.OrderBy(x => x.Number).Compare));
         CollectionAssert.AreEqual(sortlist.Take(5), col);
 
-        col.SetComparer(OrderedComparer<Thing>.OrderBy(x => x.CreatedAt).Compare);
+        col.Comparer = OrderedComparer<Thing>.OrderBy(x => x.CreatedAt).Compare;
         sortlist = list1.ToEnumerable().ToArray();
         Array.Sort(sortlist, new LambdaComparer<Thing>(OrderedComparer<Thing>.OrderBy(x => x.CreatedAt).Compare));
         CollectionAssert.AreEqual(sortlist.Take(5), col);
 
-        col.SetComparer(OrderedComparer<Thing>.OrderByDescending(x => x.Title).Compare);
+        col.Comparer = OrderedComparer<Thing>.OrderByDescending(x => x.Title).Compare;
         sortlist = list1.ToEnumerable().ToArray();
         Array.Sort(sortlist, new LambdaComparer<Thing>(OrderedComparer<Thing>.OrderByDescending(x => x.Title).Compare));
         CollectionAssert.AreEqual(sortlist.Take(5), col);
 
-        col.SetComparer(OrderedComparer<Thing>.OrderBy(x => x.Title).Compare);
+        col.Comparer = OrderedComparer<Thing>.OrderBy(x => x.Title).Compare;
         sortlist = list1.ToEnumerable().ToArray();
         Array.Sort(sortlist, new LambdaComparer<Thing>(OrderedComparer<Thing>.OrderBy(x => x.Title).Compare));
         CollectionAssert.AreEqual(sortlist.Take(5), col);
 
         col.Dispose();
+    }
+
+    [Test]
+    public void ListeningTwiceWorks()
+    {
+        var count = 10;
+        var col = new TrackingCollection<Thing>();
+        col.ProcessingDelay = TimeSpan.Zero;
+
+        var list1 = new List<Thing>(Enumerable.Range(1, count).Select(i => GetThing(i, i, count - i, "Run 1")).ToList());
+        var list2 = new List<Thing>(Enumerable.Range(1, count).Select(i => GetThing(i, i, i + count, "Run 2")).ToList());
+
+        var subj = new ReplaySubject<Unit>();
+        subj.OnNext(Unit.Default);
+        var disp = col.OriginalCompleted.Subscribe(x => subj.OnCompleted());
+        col.Listen(list1.ToObservable());
+        col.Subscribe();
+        subj.Wait();
+
+        disp.Dispose();
+        col.Listen(list2.ToObservable());
+        subj = new ReplaySubject<Unit>();
+        subj.OnNext(Unit.Default);
+        disp = col.OriginalCompleted.Subscribe(x => subj.OnCompleted());
+        col.Subscribe();
+        subj.Wait();
+        disp.Dispose();
+
+        CollectionAssert.AreEqual(list2, col);
     }
 }

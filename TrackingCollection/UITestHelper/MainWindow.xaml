@@ -4,8 +4,8 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:local="clr-namespace:ObservableTests"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        Width="323"
-        Height="697"
+        Width="490"
+        Height="513"
         mc:Ignorable="d">
   <Window.Resources>
     <Style x:Key="PullRequestListItemContainerStyle"
@@ -49,6 +49,9 @@
     <Button Content="Refresh"
             Click="Button_Click"
             DockPanel.Dock="Top" />
+    <TextBlock DockPanel.Dock="Left"
+               x:Name="log"
+               Width="100" />
 
     <ListView x:Name="list"
               DockPanel.Dock="Top"

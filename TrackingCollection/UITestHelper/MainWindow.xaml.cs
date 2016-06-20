@@ -4,8 +4,10 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Linq;
 using System.Reactive.Linq;
+using System.Reactive.Subjects;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
@@ -26,6 +28,7 @@ namespace ObservableTests
     public partial class MainWindow : Window
     {
         IDisposable disposable;
+        TrackingCollection<Thing> col;
         public MainWindow()
         {
             InitializeComponent();
@@ -42,6 +45,11 @@ namespace ObservableTests
             Activated += (s, e) =>
             {
             };
+
+            col = new TrackingCollection<Thing>(
+            OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare);
+            col.ProcessingDelay = TimeSpan.FromMilliseconds(30);
+
         }
 
         void Button_Click(object sender, RoutedEventArgs e)
@@ -79,9 +87,10 @@ namespace ObservableTests
 
             var seq = Program.GetStuff(50);
 
-            var col = new TrackingCollection<Thing>(
-                seq,
-                OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare);
+            //var col = new TrackingCollection<Thing>(
+            //    OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare);
+            //var res = col.Listen(seq);
+            //col.ProcessingDelay = TimeSpan.FromMilliseconds(20);
 
             //col.CollectionChanged += (s, ee) => {
             //    //Console.WriteLine(ee.Action);
@@ -89,7 +98,23 @@ namespace ObservableTests
             //};
 
             list.ItemsSource = col;
-            col.Subscribe();
+            //res.TimeInterval()
+            //    .Select(i => log.Text += i.Interval + "\r\n")
+            //    .Subscribe();
+            Subject<DateTime> times = new Subject<DateTime>();
+            var count = 0;
+            double time = 0;
+            times.TimeInterval().Do(i =>
+            {
+                count++;
+                time += i.Interval.TotalMilliseconds;
+                log.Text += i.Interval + "\r\n";
+            }).Subscribe(_ => { }, () => Debug.WriteLine("AVERAGE " + time / count));
+
+            var res = col.Listen(seq);
+            Debug.WriteLine("===== GO ======");
+            col.OriginalCompleted.Subscribe(_ => { }, () => times.OnCompleted());
+            col.Subscribe(x => times.OnNext(DateTime.Now), () => times.OnCompleted());
 
             //seq.Subscribe();
             //foreach (var x in seq.ToEnumerable())
