@@ -5,7 +5,6 @@ using GitHub.VisualStudio.Helpers;
 using ReactiveUI;
 #else
 using System.Windows.Threading;
-using System.Threading;
 #endif
 using System;
 using System.Collections.Concurrent;
@@ -17,6 +16,7 @@ using System.Reactive.Concurrency;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace GitHub.Collections
@@ -70,9 +70,6 @@ namespace GitHub.Collections
 
         // for speeding up IndexOf in the filtered list
         readonly Dictionary<T, int> filteredIndexCache = new Dictionary<T, int>();
-
-        readonly BehaviorSubject<TimeSpan> delays = new BehaviorSubject<TimeSpan>(TimeSpan.Zero);
-        readonly Subject<Unit> delayChanges = new Subject<Unit>();
 
         bool originalSourceIsCompleted;
         readonly Subject<Unit> originalSourceCompleted = new Subject<Unit>();
@@ -152,9 +149,10 @@ namespace GitHub.Collections
                     data = FilteredInsert(data);
                     data = FilteredMove(data);
                     data = FilteredRemove(data);
-                    UpdateProcessingDelay(new TimeInterval<ActionData>(data, DateTime.Now - now));
                     return data;
                 })
+                .TimeInterval()
+                .Select(UpdateProcessingDelay)
                 .Where(data => data.Item != null)
                 .Select(data => data.Item)
                 .Publish()
@@ -271,7 +269,7 @@ namespace GitHub.Collections
         {
             RunFetchNext();
 
-            disposables.Add(dataPump.Subscribe(_ => { }, () =>
+            disposables.Add(dataPump.Subscribe(_ => {}, () =>
             {
                 originalSourceIsCompleted = true;
             }));
@@ -286,7 +284,7 @@ namespace GitHub.Collections
                 if (queue?.TryDequeue(out d) ?? false)
                     return d;
             }
-            catch { }
+            catch {}
             return ActionData.Default;
         }
 
@@ -537,7 +535,7 @@ namespace GitHub.Collections
             if (resetting)
                 return data.Value;
 
-            if (requestedDelay != TimeSpan.Zero)
+            if (requestedDelay > TimeSpan.Zero)
             {
                 var time = data.Interval;
                 if (time > requestedDelay + fuzziness)
@@ -559,6 +557,7 @@ namespace GitHub.Collections
             if (queue.IsEmpty && originalSourceIsCompleted)
             {
                 originalSourceCompleted.OnNext(Unit.Default);
+                cancellationTokenSource.Cancel();
                 return;
             }
 
@@ -956,7 +955,7 @@ namespace GitHub.Collections
                     Task.WaitAll(tasks.ToArray());
                 }
                 // we're cancelling tasks, they may throw a cancellation exception, we don't care
-                catch { }
+                catch {}
             }
             disposables.Clear();
 

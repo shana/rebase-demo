@@ -18,6 +18,14 @@ using System.Reactive;
 [TestFixture]
 public class TrackingTests : TestBase
 {
+#if !DISABLE_REACTIVE_UI
+    [TestFixtureSetUp]
+    public void Setup()
+    {
+        Splat.ModeDetector.Current.SetInUnitTestRunner(true);
+    }
+#endif
+
     [Test]
     public void OrderByUpdatedNoFilter()
     {

@@ -6,6 +6,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
+using System.Reactive;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Text;
@@ -29,6 +30,8 @@ namespace ObservableTests
     {
         IDisposable disposable;
         TrackingCollection<Thing> col;
+        DateTimeOffset Now = new DateTimeOffset(0, TimeSpan.FromTicks(0));
+
         public MainWindow()
         {
             InitializeComponent();
@@ -53,6 +56,30 @@ namespace ObservableTests
         }
 
         void Button_Click(object sender, RoutedEventArgs e)
+        {
+            Run2();
+        }
+
+        void Run2()
+        {
+            var count = 1000;
+            var col = new TrackingCollection<Thing>() { ProcessingDelay = TimeSpan.FromMilliseconds(20) };
+            list.ItemsSource = col;
+            var subj = new ReplaySubject<Unit>();
+            subj.OnNext(Unit.Default);
+            var disp = col.OriginalCompleted.Subscribe(x => subj.OnCompleted());
+
+            var source = new Subject<Thing>();
+            col.Listen(source);
+            col.Subscribe();
+
+            var list1 = new List<Thing>(Enumerable.Range(1, count).Select(i => GetThing(i, i, count - i, "Run 1")).ToList());
+            foreach (var l in list1)
+                Add(source, l);
+            source.OnCompleted();
+        }
+
+        void Run1()
         {
             /*
             disposable?.Dispose();
@@ -121,6 +148,36 @@ namespace ObservableTests
             //{
             //    col.AddItem(x);
             //}
+        }
+
+        protected void Add(Subject<Thing> source, Thing item)
+        {
+            source.OnNext(item);
+        }
+
+        protected Thing GetThing(int id)
+        {
+            return new Thing { Number = id };
+        }
+
+        protected Thing GetThing(int id, int minutes)
+        {
+            return new Thing { Number = id, Title = "Run 1", CreatedAt = Now + TimeSpan.FromMinutes(minutes), UpdatedAt = Now + TimeSpan.FromMinutes(minutes) };
+        }
+
+        protected Thing GetThing(int id, int minutesc, int minutesu)
+        {
+            return new Thing { Number = id, Title = "Run 1", CreatedAt = Now + TimeSpan.FromMinutes(minutesc), UpdatedAt = Now + TimeSpan.FromMinutes(minutesu) };
+        }
+
+        protected Thing GetThing(int id, string title)
+        {
+            return new Thing { Number = id, Title = "Run 1" };
+        }
+
+        protected Thing GetThing(int id, int minutesc, int minutesu, string title)
+        {
+            return new Thing { Number = id, Title = title, CreatedAt = Now + TimeSpan.FromMinutes(minutesc), UpdatedAt = Now + TimeSpan.FromMinutes(minutesu) };
         }
     }
 }
