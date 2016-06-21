@@ -50,8 +50,8 @@ namespace GitHub.Collections
         Func<T, T, int> newer; // comparer to check whether the item being processed is newer than the existing one
 
         IObservable<T> source;
-        IObservable<T> dataPump;
-        IObservable<Unit> cachePump;
+        IConnectableObservable<T> dataPump;
+        IConnectableObservable<Unit> cachePump;
         ConcurrentQueue<ActionData> cache;
 
         Subject<Unit> signalHaveData;
@@ -89,6 +89,8 @@ namespace GitHub.Collections
                 requestedDelay = value;
             }
         }
+
+        bool ManualProcessing => cache.IsEmpty && originalSourceIsCompleted;
 
         public TrackingCollection(Func<T, T, int> comparer = null, Func<T, int, IList<T>, bool> filter = null,
             Func<T, T, int> newer = null, IScheduler scheduler = null)
@@ -135,10 +137,12 @@ namespace GitHub.Collections
 
             dataPump = obs
                 .Do(data =>
-            {
-                cache.Enqueue(new ActionData(data));
-                signalHaveData.OnNext(Unit.Default);
-            });
+                {
+                    cache.Enqueue(new ActionData(data));
+                    signalHaveData.OnNext(Unit.Default);
+                })
+                .Finally(() => originalSourceIsCompleted = true)
+                .Publish();
 
 
             // when both signalHaveData and signalNeedData produce a value, dataListener gets a value
@@ -149,22 +153,19 @@ namespace GitHub.Collections
                 .ObserveOn(TaskPoolScheduler.Default)
                 .TimeInterval()
                 .Select(interval =>
-            {
-                var delay = CalculateProcessingDelay(interval);
-                waitHandle.Wait(delay);
-                dataListener.OnNext(GetFromQueue());
-                return Unit.Default;
-            });
+                {
+                    var delay = CalculateProcessingDelay(interval);
+                    waitHandle.Wait(delay);
+                    dataListener.OnNext(GetFromQueue());
+                    return Unit.Default;
+                })
+                .Publish();
 
             source = dataListener
                 .Where(data => data.Item != null)
                 .ObserveOn(scheduler)
                 .Select(data => {
                     data = ProcessItem(data, original);
-
-                    // we're ignoring the item, likely because it's a stale version (based on the set comparer)
-                    if (data.Item == null)
-                        return data;
 
                     // if we're removing an item that doesn't exist, ignore it
                     if (data.TheAction == TheAction.Remove && data.OldPosition < 0)
@@ -189,15 +190,15 @@ namespace GitHub.Collections
                     Debug.WriteLine(ex);
                     return Observable.Return(ActionData.Default);
                 })
-                .Where(data => data.Item != null)
-                .Select(data => data.Item)
                 .Do(_ =>
                 {
-                    if (cache.IsEmpty && originalSourceIsCompleted)
+                    if (ManualProcessing)
                         originalSourceCompleted.OnNext(Unit.Default);
                     else
                         signalNeedData.OnNext(Unit.Default);
                 })
+                .Where(data => data.Item != null)
+                .Select(data => data.Item)
                 .Publish()
                 .RefCount();
 
@@ -289,14 +290,28 @@ namespace GitHub.Collections
         {
             if (disposed)
                 throw new ObjectDisposedException("TrackingCollection");
-            dataListener.OnNext(new ActionData(item));
+
+            if (ManualProcessing)
+                dataListener.OnNext(new ActionData(item));
+            else
+            {
+                cache.Enqueue(new ActionData(item));
+                signalHaveData.OnNext(Unit.Default);
+            }
         }
 
         public void RemoveItem(T item)
         {
             if (disposed)
                 throw new ObjectDisposedException("TrackingCollection");
-            dataListener.OnNext(new ActionData(TheAction.Remove, item));
+
+            if (ManualProcessing)
+                dataListener.OnNext(new ActionData(TheAction.Remove, item));
+            else
+            {
+                cache.Enqueue(new ActionData(TheAction.Remove, item));
+                signalHaveData.OnNext(Unit.Default);
+            }
         }
 
         void SetAndRecalculateSort(Func<T, T, int> theComparer)
@@ -331,11 +346,8 @@ namespace GitHub.Collections
 
         int StartQueue()
         {
-            disposables.Add(cachePump.Subscribe());
-            disposables.Add(dataPump.Subscribe(_ => {}, () =>
-            {
-                originalSourceIsCompleted = true;
-            }));
+            disposables.Add(cachePump.Connect());
+            disposables.Add(dataPump.Connect());
             signalNeedData.OnNext(Unit.Default);
             return 0;
         }
@@ -348,7 +360,7 @@ namespace GitHub.Collections
                 if (cache?.TryDequeue(out d) ?? false)
                     return d;
             }
-            catch {}
+            catch { }
             return ActionData.Default;
         }
 
@@ -369,7 +381,7 @@ namespace GitHub.Collections
 
                 // the object is "older" than the one we have, ignore it
                 if (isNewer > 0)
-                    ret = ActionData.Default;
+                    ret = new ActionData(TheAction.None, list, item, null, idx, idx);
 
                 var comparison = comparer(item, old);
 
@@ -902,7 +914,7 @@ namespace GitHub.Collections
                 ret = original.IndexOf(item);
                 if (ret >= 0)
                     sortedIndexCache.Add(original[ret], ret);
-                    
+
             }
             return ret;
         }
