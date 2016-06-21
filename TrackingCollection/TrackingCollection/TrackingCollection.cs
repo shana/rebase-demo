@@ -47,6 +47,7 @@ namespace GitHub.Collections
 
         Func<T, T, int> comparer;
         Func<T, int, IList<T>, bool> filter;
+        Func<T, T, int> newer; // comparer to check whether the item being processed is newer than the existing one
 
         IObservable<T> source;
         IObservable<T> dataPump;
@@ -88,7 +89,8 @@ namespace GitHub.Collections
             }
         }
 
-        public TrackingCollection(Func<T, T, int> comparer = null, Func<T, int, IList<T>, bool> filter = null, IScheduler scheduler = null)
+        public TrackingCollection(Func<T, T, int> comparer = null, Func<T, int, IList<T>, bool> filter = null,
+            Func<T, T, int> newer = null, IScheduler scheduler = null)
         {
             queue = new ConcurrentQueue<ActionData>();
             ProcessingDelay = TimeSpan.FromMilliseconds(10);
@@ -101,13 +103,15 @@ namespace GitHub.Collections
 #endif
             this.comparer = comparer ?? Comparer<T>.Default.Compare;
             this.filter = filter;
+            this.newer = newer ?? Comparer<T>.Default.Compare;
         }
 
         public TrackingCollection(IObservable<T> source,
             Func<T, T, int> comparer = null,
             Func<T, int, IList<T>, bool> filter = null,
+            Func<T, T, int> newer = null,
             IScheduler scheduler = null)
-            : this(comparer, filter, scheduler)
+            : this(comparer, filter, newer, scheduler)
         {
             Listen(source);
         }
@@ -133,9 +137,15 @@ namespace GitHub.Collections
                 .ObserveOn(scheduler)
                 .Select(data => {
                     data = ProcessItem(data, original);
+
+                    // we're ignoring the item, likely because it's a stale version (based on the set comparer)
+                    if (data.Item == null)
+                        return data;
+
                     // if we're removing an item that doesn't exist, ignore it
                     if (data.TheAction == TheAction.Remove && data.OldPosition < 0)
                         return ActionData.Default;
+
                     data = SortedNone(data);
                     data = SortedAdd(data);
                     data = SortedInsert(data);
@@ -149,6 +159,11 @@ namespace GitHub.Collections
                     data = FilteredMove(data);
                     data = FilteredRemove(data);
                     return data;
+                })
+                .Catch<ActionData, Exception>(ex =>
+                {
+                    Debug.WriteLine(ex);
+                    return Observable.Return(ActionData.Default);
                 })
                 .TimeInterval()
                 .Select(UpdateProcessingDelay)
@@ -195,6 +210,27 @@ namespace GitHub.Collections
                 if (disposed)
                     throw new ObjectDisposedException("TrackingCollection");
                 SetAndRecalculateFilter(value);
+            }
+        }
+
+        /// <summary>
+        /// Set a comparer that determines whether the item being processed is newer than the same
+        /// item seen before. This is to prevent stale items from overriding newer items when data
+        /// is coming simultaneously from cache and from live data. Use a timestamp-like comparison
+        /// for best results
+        /// </summary>
+        /// <param name="theComparer">The comparer method for sorting, or null if not sorting</param>
+        public Func<T, T, int> NewerComparer
+        {
+            get
+            {
+                return newer;
+            }
+            set
+            {
+                if (disposed)
+                    throw new ObjectDisposedException("TrackingCollection");
+                newer = value;
             }
         }
 
@@ -300,6 +336,12 @@ namespace GitHub.Collections
             if (idx >= 0)
             {
                 var old = list[idx];
+                var isNewer = newer(item, old);
+
+                // the object is "older" than the one we have, ignore it
+                if (isNewer > 0)
+                    ret = ActionData.Default;
+
                 var comparison = comparer(item, old);
 
                 // no sorting to be done, just replacing the element in-place
@@ -869,7 +911,8 @@ namespace GitHub.Collections
             {
                 ret = original.IndexOf(item);
                 if (ret >= 0)
-                    sortedIndexCache.Add(item, ret);
+                    sortedIndexCache.Add(original[ret], ret);
+                    
             }
             return ret;
         }
