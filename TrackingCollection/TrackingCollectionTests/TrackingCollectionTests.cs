@@ -398,7 +398,7 @@ public class TrackingTests : TestBase
 
         evt.WaitOne();
         var time = (DateTimeOffset.UtcNow - start).TotalMilliseconds;
-        Assert.LessOrEqual(time, 120);
+        Assert.LessOrEqual(time, 100);
         evt.Reset();
 
         Assert.AreEqual(total, count);
@@ -1899,7 +1899,6 @@ public class TrackingTests : TestBase
         col.NewerComparer = OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare;
         col.ProcessingDelay = TimeSpan.Zero;
 
-        var count = 0;
         var evt = new ManualResetEvent(false);
         col.OriginalCompleted.Subscribe(_ => evt.Set());
         col.Subscribe();

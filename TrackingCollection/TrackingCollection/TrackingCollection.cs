@@ -51,12 +51,14 @@ namespace GitHub.Collections
 
         IObservable<T> source;
         IObservable<T> dataPump;
-        ConcurrentQueue<ActionData> queue;
+        IObservable<Unit> cachePump;
+        ConcurrentQueue<ActionData> cache;
+
+        Subject<Unit> signalHaveData;
+        Subject<Unit> signalNeedData;
         Subject<ActionData> dataListener;
-        CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
-        ConcurrentBag<Task> tasks;
+
         bool resetting = false;
-        ManualResetEvent waitHandle = new ManualResetEvent(false);
 
         readonly CompositeDisposable disposables = new CompositeDisposable();
         readonly IScheduler scheduler;
@@ -76,23 +78,22 @@ namespace GitHub.Collections
         readonly Subject<Unit> originalSourceCompleted = new Subject<Unit>();
         public IObservable<Unit> OriginalCompleted => originalSourceCompleted;
 
-        TimeSpan delay;
         TimeSpan requestedDelay;
         readonly TimeSpan fuzziness;
+
         public TimeSpan ProcessingDelay
         {
             get { return requestedDelay; }
             set
             {
                 requestedDelay = value;
-                delay = value;
             }
         }
 
         public TrackingCollection(Func<T, T, int> comparer = null, Func<T, int, IList<T>, bool> filter = null,
             Func<T, T, int> newer = null, IScheduler scheduler = null)
         {
-            queue = new ConcurrentQueue<ActionData>();
+            cache = new ConcurrentQueue<ActionData>();
             ProcessingDelay = TimeSpan.FromMilliseconds(10);
             fuzziness = TimeSpan.FromMilliseconds(1);
 
@@ -130,7 +131,30 @@ namespace GitHub.Collections
 
             Reset();
 
-            dataPump = obs.Do(data => queue.Enqueue(new ActionData(data)));
+            var waitHandle = new ManualResetEventSlim();
+
+            dataPump = obs
+                .Do(data =>
+            {
+                cache.Enqueue(new ActionData(data));
+                signalHaveData.OnNext(Unit.Default);
+            });
+
+
+            // when both signalHaveData and signalNeedData produce a value, dataListener gets a value
+            // this will empty the queue of items that have been cached in regular intervals according
+            // to the requested delay
+            cachePump = signalHaveData
+                .Zip(signalNeedData, (a, b) => Unit.Default)
+                .ObserveOn(TaskPoolScheduler.Default)
+                .TimeInterval()
+                .Select(interval =>
+            {
+                var delay = CalculateProcessingDelay(interval);
+                waitHandle.Wait(delay);
+                dataListener.OnNext(GetFromQueue());
+                return Unit.Default;
+            });
 
             source = dataListener
                 .Where(data => data.Item != null)
@@ -165,10 +189,15 @@ namespace GitHub.Collections
                     Debug.WriteLine(ex);
                     return Observable.Return(ActionData.Default);
                 })
-                .TimeInterval()
-                .Select(UpdateProcessingDelay)
                 .Where(data => data.Item != null)
                 .Select(data => data.Item)
+                .Do(_ =>
+                {
+                    if (cache.IsEmpty && originalSourceIsCompleted)
+                        originalSourceCompleted.OnNext(Unit.Default);
+                    else
+                        signalNeedData.OnNext(Unit.Default);
+                })
                 .Publish()
                 .RefCount();
 
@@ -302,12 +331,12 @@ namespace GitHub.Collections
 
         int StartQueue()
         {
-            RunFetchNext();
-
+            disposables.Add(cachePump.Subscribe());
             disposables.Add(dataPump.Subscribe(_ => {}, () =>
             {
                 originalSourceIsCompleted = true;
             }));
+            signalNeedData.OnNext(Unit.Default);
             return 0;
         }
 
@@ -316,7 +345,7 @@ namespace GitHub.Collections
             try
             {
                 ActionData d = ActionData.Default;
-                if (queue?.TryDequeue(out d) ?? false)
+                if (cache?.TryDequeue(out d) ?? false)
                     return d;
             }
             catch {}
@@ -571,14 +600,12 @@ namespace GitHub.Collections
         /// so that the average time between an item being processed
         /// is +- the requested processing delay.
         /// </summary>
-        ActionData UpdateProcessingDelay(TimeInterval<ActionData> data)
+        TimeSpan CalculateProcessingDelay(TimeInterval<Unit> interval)
         {
-            if (resetting)
-                return data.Value;
-
+            var delay = TimeSpan.Zero;
             if (requestedDelay > TimeSpan.Zero)
             {
-                var time = data.Interval;
+                var time = interval.Interval;
                 if (time > requestedDelay + fuzziness)
                     delay -= time - requestedDelay;
                 else if (time < requestedDelay + fuzziness)
@@ -586,44 +613,7 @@ namespace GitHub.Collections
                 delay = delay < TimeSpan.Zero ? TimeSpan.Zero : delay;
             }
 
-            RunFetchNext();
-            return data.Value;
-        }
-
-        void RunFetchNext()
-        {
-            // if the original observable is done and there's nothing in
-            // the queue, we don't need to run fetching code anymore
-            // everything else will be added directly to the dataListener
-            if (queue.IsEmpty && originalSourceIsCompleted)
-            {
-                originalSourceCompleted.OnNext(Unit.Default);
-                cancellationTokenSource.Cancel();
-                return;
-            }
-
-            var calculatedDelay = delay;
-            Task task = null;
-            task = Task.Run(() =>
-            {
-                if (calculatedDelay > TimeSpan.Zero)
-                {
-                    // this uses the realtime clock for accurate waits, as opposed
-                    // to Thread.Sleep, which is not accurate below 50ms
-                    waitHandle.WaitOne(calculatedDelay);
-                }
-                ActionData item;
-                do
-                {
-                    if (cancellationTokenSource.IsCancellationRequested)
-                        return;
-                    item = GetFromQueue();
-                    if (item.Item != null)
-                        dataListener.OnNext(item);
-                } while (item.Item == null);
-            }, cancellationTokenSource.Token);
-            tasks.Add(task);
-            disposables.Add(task);
+            return delay;
         }
 
         #endregion
@@ -989,24 +979,16 @@ namespace GitHub.Collections
                 return;
 
             resetting = true;
-            if (tasks != null)
-            {
-                cancellationTokenSource.Cancel();
-                try
-                {
-                    Task.WaitAll(tasks.ToArray());
-                }
-                // we're cancelling tasks, they may throw a cancellation exception, we don't care
-                catch {}
-            }
-            disposables.Clear();
 
+            disposables.Clear();
             originalSourceIsCompleted = false;
-            cancellationTokenSource = new CancellationTokenSource();
-            tasks = new ConcurrentBag<Task>();
-            queue = new ConcurrentQueue<ActionData>();
+            cache = new ConcurrentQueue<ActionData>();
             dataListener = new Subject<ActionData>();
             disposables.Add(dataListener);
+            signalHaveData = new Subject<Unit>();
+            disposables.Add(signalHaveData);
+            signalNeedData = new Subject<Unit>();
+            disposables.Add(signalNeedData);
 
             resetting = false;
         }
@@ -1019,15 +1001,8 @@ namespace GitHub.Collections
                 if (!disposed)
                 {
                     disposed = true;
-                    queue = null;
-                    cancellationTokenSource.Cancel();
-                    try
-                    {
-                        Task.WaitAll(tasks.ToArray());
-                    }
-                    // we're cancelling tasks, they may throw a cancellation exception, we don't care
-                    catch {}
                     disposables.Dispose();
+                    cache = null;
                 }
             }
         }

@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Reactive.Subjects;
 using System.Text;
+using System.Threading.Tasks;
 
 public class TestBase
 {
@@ -69,9 +70,10 @@ public class TestBase
         return Equals(thing1, thing2) && thing1.Title == thing2.Title && thing1.CreatedAt == thing2.CreatedAt && thing1.UpdatedAt == thing2.UpdatedAt;
     }
 
-    protected void Add(Subject<Thing> source, Thing item)
+    protected async void Add(Subject<Thing> source, Thing item)
     {
         source.OnNext(item);
+        await Task.Delay(TimeSpan.Zero);
     }
 
     protected Thing GetThing(int id)
