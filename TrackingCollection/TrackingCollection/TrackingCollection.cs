@@ -195,10 +195,6 @@ namespace GitHub.Collections
                     data = SortedInsert(data);
                     data = SortedMove(data);
                     data = SortedRemove(data);
-                    return data;
-                })
-                .Select(data =>
-                {
                     data = CheckFilter(data);
                     data = FilteredAdd(data);
                     data = CalculateIndexes(data);
