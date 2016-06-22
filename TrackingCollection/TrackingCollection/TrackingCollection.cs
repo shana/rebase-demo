@@ -471,7 +471,7 @@ namespace GitHub.Collections
             // unfiltered list update
             sortedIndexCache.Remove(data.Item);
             UpdateIndexCache(data.List.Count - 1, data.OldPosition, data.List, sortedIndexCache);
-            original.Remove(data.Item);
+            data.List.Remove(data.Item);
             return data;
         }
 
