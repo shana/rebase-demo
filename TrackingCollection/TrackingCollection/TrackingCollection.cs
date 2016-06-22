@@ -85,10 +85,7 @@ namespace GitHub.Collections
         public TimeSpan ProcessingDelay
         {
             get { return requestedDelay; }
-            set
-            {
-                requestedDelay = value;
-            }
+            set { requestedDelay = value; }
         }
 
         bool ManualProcessing => cache.IsEmpty && originalSourceIsCompleted;
@@ -134,8 +131,12 @@ namespace GitHub.Collections
 
             Reset();
 
+            // ManualResetEvent uses the realtime clock for accurate <50ms delays
             var waitHandle = new ManualResetEventSlim();
 
+            // empty the source observable as fast as possible
+            // to the cache queue, and signal that data is available
+            // for processing
             dataPump = obs
                 .Do(data =>
                 {
@@ -168,7 +169,8 @@ namespace GitHub.Collections
             source = dataListener
                 .Where(data => data.Item != null)
                 .ObserveOn(scheduler)
-                .Select(data => {
+                .Select(data =>
+                {
                     data = ProcessItem(data, original);
 
                     // if we're removing an item that doesn't exist, ignore it
@@ -180,6 +182,10 @@ namespace GitHub.Collections
                     data = SortedInsert(data);
                     data = SortedMove(data);
                     data = SortedRemove(data);
+                    return data;
+                })
+                .Select(data =>
+                {
                     data = CheckFilter(data);
                     data = FilteredAdd(data);
                     data = CalculateIndexes(data);
@@ -188,11 +194,6 @@ namespace GitHub.Collections
                     data = FilteredMove(data);
                     data = FilteredRemove(data);
                     return data;
-                })
-                .Catch<ActionData, Exception>(ex =>
-                {
-                    Debug.WriteLine(ex);
-                    return Observable.Return(ActionData.Default);
                 })
                 .Do(_ =>
                 {
