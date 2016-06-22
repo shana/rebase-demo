@@ -477,7 +477,6 @@ public class TrackingTests : TestBase
         ITrackingCollection<Thing> col = new TrackingCollection<Thing>(
             source,
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare);
-        col.NewerComparer = OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare;
         col.ProcessingDelay = TimeSpan.Zero;
 
         var count = 0;
@@ -673,7 +672,6 @@ public class TrackingTests : TestBase
             source,
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare,
             (item, position, list) => true);
-        col.NewerComparer = OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare;
         col.ProcessingDelay = TimeSpan.Zero;
 
         var count = 0;
@@ -862,7 +860,6 @@ public class TrackingTests : TestBase
             source,
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare,
             (item, position, list) => item.UpdatedAt.Minute >= 6 && item.UpdatedAt.Minute <= 12);
-        col.NewerComparer = OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare;
         col.ProcessingDelay = TimeSpan.Zero;
 
         var count = 0;
@@ -1017,7 +1014,6 @@ public class TrackingTests : TestBase
             source,
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare,
             (item, position, list) => position >= 2 && position <= 4);
-        col.NewerComparer = OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare;
         col.ProcessingDelay = TimeSpan.Zero;
 
         var count = 0;
@@ -1165,7 +1161,6 @@ public class TrackingTests : TestBase
             source,
             OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare,
             (item, position, list) => position == 1 || (position >= 3 && position <= 4));
-        col.NewerComparer = OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare;
         col.ProcessingDelay = TimeSpan.Zero;
 
         var count = 0;
@@ -1329,7 +1324,6 @@ public class TrackingTests : TestBase
             source,
             OrderedComparer<Thing>.OrderBy(x => x.UpdatedAt).Compare,
             (item, position, list) => (position >= 1 && position <= 2) || (position >= 5 && position <= 7));
-        col.NewerComparer = OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare;
         col.ProcessingDelay = TimeSpan.Zero;
 
         var count = 0;
