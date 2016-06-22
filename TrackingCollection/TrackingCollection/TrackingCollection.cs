@@ -40,7 +40,8 @@ namespace GitHub.Collections
             Move,
             Add,
             Insert,
-            Remove
+            Remove,
+            Ignore
         }
 
         bool isChanging;
@@ -104,7 +105,7 @@ namespace GitHub.Collections
 #endif
             this.comparer = comparer ?? Comparer<T>.Default.Compare;
             this.filter = filter;
-            this.newer = newer ?? Comparer<T>.Default.Compare;
+            this.newer = newer;
         }
 
         public TrackingCollection(IObservable<T> source,
@@ -378,11 +379,12 @@ namespace GitHub.Collections
             if (idx >= 0)
             {
                 var old = list[idx];
-                var isNewer = newer(item, old);
-
-                // the object is "older" than the one we have, ignore it
-                if (isNewer > 0)
-                    ret = new ActionData(TheAction.None, list, item, null, idx, idx);
+                if (newer != null)
+                {
+                    // the object is "older" than the one we have, ignore it
+                    if (newer(item, old) > 0)
+                        return new ActionData(TheAction.Ignore, list, item, null, idx, idx);
+                }
 
                 var comparison = comparer(item, old);
 
