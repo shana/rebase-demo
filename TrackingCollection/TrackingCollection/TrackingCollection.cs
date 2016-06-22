@@ -344,16 +344,6 @@ namespace GitHub.Collections
 
         #region Source pipeline processing
 
-        ActionData CheckFilter(ActionData data)
-        {
-            var isIncluded = true;
-            if (data.TheAction == TheAction.Remove)
-                isIncluded = false;
-            else if (filter != null)
-                isIncluded = filter(data.Item, data.Position, this);
-            return new ActionData(data, isIncluded);
-        }
-
         int StartQueue()
         {
             disposables.Add(cachePump.Connect());
@@ -473,6 +463,16 @@ namespace GitHub.Collections
             UpdateIndexCache(data.List.Count - 1, data.OldPosition, data.List, sortedIndexCache);
             data.List.Remove(data.Item);
             return data;
+        }
+
+        ActionData CheckFilter(ActionData data)
+        {
+            var isIncluded = true;
+            if (data.TheAction == TheAction.Remove)
+                isIncluded = false;
+            else if (filter != null)
+                isIncluded = filter(data.Item, data.Position, this);
+            return new ActionData(data, isIncluded);
         }
 
         ActionData FilteredAdd(ActionData data)
