@@ -75,6 +75,7 @@ namespace GitHub.Collections
         readonly Dictionary<T, int> filteredIndexCache = new Dictionary<T, int>();
 
         bool originalSourceIsCompleted;
+        bool signalOriginalSourceCompletion;
         readonly Subject<Unit> originalSourceCompleted = new Subject<Unit>();
         public IObservable<Unit> OriginalCompleted => originalSourceCompleted;
 
@@ -141,9 +142,12 @@ namespace GitHub.Collections
                     cache.Enqueue(new ActionData(data));
                     signalHaveData.OnNext(Unit.Default);
                 })
-                .Finally(() => originalSourceIsCompleted = true)
+                .Finally(() =>
+                {
+                    originalSourceIsCompleted = true;
+                    signalOriginalSourceCompletion = true;
+                })
                 .Publish();
-
 
             // when both signalHaveData and signalNeedData produce a value, dataListener gets a value
             // this will empty the queue of items that have been cached in regular intervals according
@@ -193,7 +197,13 @@ namespace GitHub.Collections
                 .Do(_ =>
                 {
                     if (ManualProcessing)
-                        originalSourceCompleted.OnNext(Unit.Default);
+                    {
+                        if (signalOriginalSourceCompletion)
+                        {
+                            signalOriginalSourceCompletion = false;
+                            originalSourceCompleted.OnNext(Unit.Default);
+                        }
+                    }
                     else
                         signalNeedData.OnNext(Unit.Default);
                 })
@@ -994,6 +1004,7 @@ namespace GitHub.Collections
 
             disposables.Clear();
             originalSourceIsCompleted = false;
+            signalOriginalSourceCompletion = false;
             cache = new ConcurrentQueue<ActionData>();
             dataListener = new Subject<ActionData>();
             disposables.Add(dataListener);
