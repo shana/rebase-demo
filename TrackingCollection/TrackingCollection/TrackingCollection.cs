@@ -21,6 +21,19 @@ using System.Threading.Tasks;
 
 namespace GitHub.Collections
 {
+    public static class TrackingCollection
+    {
+        public static TrackingCollection<T> Create<T>(IObservable<T> source,
+            Func<T, T, int> comparer = null,
+            Func<T, int, IList<T>, bool> filter = null,
+            Func<T, T, int> newer = null,
+            IScheduler scheduler = null)
+            where T : class, ICopyable<T>
+        {
+            return new TrackingCollection<T>(source, comparer, filter, newer, scheduler);
+        }
+    }
+
     /// <summary>
     /// TrackingCollection is a specialization of ObservableCollection that gets items from
     /// an observable sequence and updates its contents in such a way that two updates to
