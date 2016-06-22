@@ -62,21 +62,22 @@ namespace ObservableTests
 
         void Run2()
         {
-            var count = 1000;
-            var col = new TrackingCollection<Thing>() { ProcessingDelay = TimeSpan.FromMilliseconds(20) };
-            list.ItemsSource = col;
-            var subj = new ReplaySubject<Unit>();
-            subj.OnNext(Unit.Default);
-            var disp = col.OriginalCompleted.Subscribe(x => subj.OnCompleted());
+            var count = 10;
+            var col = new TrackingCollection<Thing>();
+            col.ProcessingDelay = TimeSpan.FromMilliseconds(20);
 
-            var source = new Subject<Thing>();
+            col.NewerComparer = OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare;
+            list.ItemsSource = col;
+
+            var source = Observable.Merge(
+                Observable.Generate(0, i => i < count, i => i + 1, i => i, i => TimeSpan.FromMilliseconds(5))
+                    .Select(i => GetThing(i, i, i, "Run 1")),
+                Observable.Generate(0, i => i < count, i => i + 1, i => i, i => TimeSpan.FromMilliseconds(7))
+                    .Select(i => GetThing(i, i, i + 1, "Run 2"))
+            );
+
             col.Listen(source);
             col.Subscribe();
-
-            var list1 = new List<Thing>(Enumerable.Range(1, count).Select(i => GetThing(i, i, count - i, "Run 1")).ToList());
-            foreach (var l in list1)
-                Add(source, l);
-            source.OnCompleted();
         }
 
         void Run1()
