@@ -79,7 +79,7 @@ public class TrackingTests : TestBase
             Observable.Never<Thing>(),
             OrderedComparer<Thing>.OrderBy(x => x.UpdatedAt).Compare,
             (item, position, list) => true,
-            OrderedComparer<Thing>.OrderBy(x => x.UpdatedAt).Compare);       
+            OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare);
         col.ProcessingDelay = TimeSpan.Zero;
 
         var list1 = new List<Thing>(Enumerable.Range(1, count).Select(i => GetThing(i, i, count - i, "Run 1")).ToList());
@@ -1447,7 +1447,6 @@ public class TrackingTests : TestBase
             source,
             OrderedComparer<Thing>.OrderBy(x => x.CreatedAt).Compare,
             (item, position, list) => item.UpdatedAt > now + TimeSpan.FromMinutes(2) && item.UpdatedAt < now + TimeSpan.FromMinutes(8));
-        col.NewerComparer = OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare;
         col.ProcessingDelay = TimeSpan.Zero;
 
         var count = 0;
@@ -1762,7 +1761,6 @@ public class TrackingTests : TestBase
             source,
             OrderedComparer<Thing>.OrderBy(x => x.UpdatedAt).Compare,
             (item, position, list) => (position > 2 && position < 5) || (position > 6 && position < 8));
-        col.NewerComparer = OrderedComparer<Thing>.OrderByDescending(x => x.UpdatedAt).Compare;
         col.ProcessingDelay = TimeSpan.Zero;
 
         var count = 0;
